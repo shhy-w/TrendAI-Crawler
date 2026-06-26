@@ -113,6 +113,16 @@ button:disabled {
   gap: 12px;
 }
 
+.proxy-panel {
+  margin-top: 16px;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .filters {
   grid-template-columns: repeat(4, minmax(130px, 1fr)) 44px;
   align-items: end;
@@ -137,6 +147,7 @@ select {
 }
 
 .primary-button,
+.secondary-button,
 .primary-link,
 .icon-button,
 .pagination button {
@@ -155,6 +166,12 @@ select {
   color: #ffffff;
   background: #17202a;
   padding: 0 14px;
+}
+
+.secondary-button {
+  color: #17202a;
+  background: #ffffff;
+  padding: 0 12px;
 }
 
 .icon-button {
@@ -180,6 +197,23 @@ select {
   margin-top: 16px;
 }
 
+.proxy-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.proxy-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
 .job-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -189,6 +223,10 @@ select {
   background: #f8fafc;
   border-radius: 6px;
   font-size: 13px;
+}
+
+.job-keywords {
+  overflow-wrap: anywhere;
 }
 
 .status {
@@ -214,6 +252,25 @@ select {
 .error-text,
 .error-banner {
   color: #a73333;
+}
+
+.failure-type,
+.error-text,
+.debug-path {
+  grid-column: 1 / -1;
+}
+
+.failure-type {
+  width: fit-content;
+  padding: 3px 8px;
+  color: #704600;
+  background: #fff0c2;
+  border-radius: 999px;
+}
+
+.debug-path {
+  color: #637083;
+  overflow-wrap: anywhere;
 }
 
 .status-failed {

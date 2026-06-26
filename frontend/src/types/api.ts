@@ -40,9 +40,32 @@ export type CrawlJob = {
   started_at: string | null;
   finished_at: string | null;
   success_count: number;
+  failure_type: string | null;
+  debug_path: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ProxyItem = {
+  id: number;
+  name: string;
+  proxy_url: string;
+  status: string;
+  failure_count: number;
+  success_count: number;
+  last_error: string | null;
+  last_checked_at: string | null;
+  cooldown_until: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProxyCheckResult = {
+  proxy_id: number;
+  status: string;
+  message: string;
+  guest_token_ok: boolean;
 };
 
 export type PostFilters = {

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
-import { createJob, listJobs, listPosts } from './lib/api';
-import type { CrawlJob, Post, PostFilters } from './types/api';
+import { addProxy, checkProxies, createJob, listJobs, listPosts, listProxies } from './lib/api';
+import type { CrawlJob, Post, PostFilters, ProxyItem } from './types/api';
 import { CrawlPanel } from './components/CrawlPanel';
 import { Filters } from './components/Filters';
 import { PostDetail } from './components/PostDetail';
 import { PostList } from './components/PostList';
+import { ProxyPanel } from './components/ProxyPanel';
 import './styles/app.css';
 
 const initialFilters: PostFilters = {
@@ -19,11 +20,15 @@ export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
   const [jobs, setJobs] = useState<CrawlJob[]>([]);
+  const [proxies, setProxies] = useState<ProxyItem[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [keywords, setKeywords] = useState('AI, vibe coding, agent');
   const [maxPosts, setMaxPosts] = useState(20);
+  const [proxyName, setProxyName] = useState('');
+  const [proxyUrl, setProxyUrl] = useState('');
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
+  const [proxyLoading, setProxyLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasRunningJob = useMemo(() => jobs.some((job) => job.status === 'pending' || job.status === 'running'), [jobs]);
@@ -50,6 +55,14 @@ export default function App() {
     }
   }
 
+  async function refreshProxies() {
+    try {
+      setProxies(await listProxies());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载代理失败');
+    }
+  }
+
   async function handleCreateJob() {
     const parsedKeywords = keywords
       .split(',')
@@ -71,6 +84,42 @@ export default function App() {
     }
   }
 
+  async function handleAddProxy() {
+    if (!proxyName.trim() || !proxyUrl.trim()) {
+      setError('代理名称和 URL 都必填');
+      return;
+    }
+    setProxyLoading(true);
+    setError(null);
+    try {
+      await addProxy(proxyName.trim(), proxyUrl.trim());
+      setProxyName('');
+      setProxyUrl('');
+      await refreshProxies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '添加代理失败');
+    } finally {
+      setProxyLoading(false);
+    }
+  }
+
+  async function handleCheckProxies() {
+    setProxyLoading(true);
+    setError(null);
+    try {
+      const results = await checkProxies();
+      const failed = results.filter((result) => !result.guest_token_ok);
+      if (failed.length > 0) {
+        setError(`代理检查完成，${failed.length} 个代理不可用`);
+      }
+      await refreshProxies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '检查代理失败');
+    } finally {
+      setProxyLoading(false);
+    }
+  }
+
   function handleFiltersChange(nextFilters: PostFilters) {
     setFilters(nextFilters);
     void refreshPosts(nextFilters);
@@ -79,6 +128,7 @@ export default function App() {
   useEffect(() => {
     void refreshPosts();
     void refreshJobs();
+    void refreshProxies();
   }, []);
 
   useEffect(() => {
@@ -117,6 +167,17 @@ export default function App() {
             onMaxPostsChange={setMaxPosts}
             onCreateJob={handleCreateJob}
             onRefreshJobs={refreshJobs}
+          />
+          <ProxyPanel
+            proxies={proxies}
+            proxyName={proxyName}
+            proxyUrl={proxyUrl}
+            loading={proxyLoading}
+            onProxyNameChange={setProxyName}
+            onProxyUrlChange={setProxyUrl}
+            onAddProxy={handleAddProxy}
+            onRefresh={refreshProxies}
+            onCheck={handleCheckProxies}
           />
         </aside>
         <section className="content">

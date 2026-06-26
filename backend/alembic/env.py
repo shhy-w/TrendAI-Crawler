@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.db.base import Base
-from app.models import crawl_job, media, post  # noqa: F401
+from app.models import crawl_cache, crawl_failure, crawl_job, guest_token, media, post, proxy, query_id_cache  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

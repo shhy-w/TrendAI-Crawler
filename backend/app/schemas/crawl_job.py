@@ -21,6 +21,8 @@ class CrawlJobRead(BaseModel):
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     success_count: int
+    failure_type: Optional[str]
+    debug_path: Optional[str]
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime

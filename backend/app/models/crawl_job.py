@@ -28,4 +28,6 @@ class CrawlJob(TimestampMixin, Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     success_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failure_type: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    debug_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

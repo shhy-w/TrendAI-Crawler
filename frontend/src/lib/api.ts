@@ -1,4 +1,4 @@
-import type { CrawlJob, Post, PostFilters, PostListResponse } from '../types/api';
+import type { CrawlJob, Post, PostFilters, PostListResponse, ProxyCheckResult, ProxyItem } from '../types/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -44,5 +44,22 @@ export function createJob(keywords: string[], maxPostsPerKeyword: number): Promi
       keywords,
       max_posts_per_keyword: maxPostsPerKeyword,
     }),
+  });
+}
+
+export function listProxies(): Promise<ProxyItem[]> {
+  return request<ProxyItem[]>('/api/operations/proxies');
+}
+
+export function addProxy(name: string, proxyUrl: string): Promise<ProxyItem> {
+  return request<ProxyItem>('/api/operations/proxies', {
+    method: 'POST',
+    body: JSON.stringify({ name, proxy_url: proxyUrl }),
+  });
+}
+
+export function checkProxies(): Promise<ProxyCheckResult[]> {
+  return request<ProxyCheckResult[]>('/api/operations/proxies/check', {
+    method: 'POST',
   });
 }

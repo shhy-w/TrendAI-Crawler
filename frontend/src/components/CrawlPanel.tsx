@@ -57,9 +57,11 @@ export function CrawlPanel({
           jobs.slice(0, 5).map((job) => (
             <div className="job-item" key={job.id}>
               <span className={`status status-${job.status}`}>{job.status}</span>
-              <span>{job.keywords.join(', ')}</span>
+              <span className="job-keywords">{job.keywords.join(', ')}</span>
               <span>{job.success_count} 条</span>
+              {job.failure_type ? <span className="failure-type">{job.failure_type}</span> : null}
               {job.error_message ? <span className="error-text">{job.error_message}</span> : null}
+              {job.debug_path ? <span className="debug-path">{job.debug_path}</span> : null}
             </div>
           ))
         )}
