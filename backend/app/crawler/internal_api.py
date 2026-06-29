@@ -99,10 +99,10 @@ class InternalXApiCrawler:
         ) as client:
             bearer_record = await self._ensure_web_bearer(client)
             client.headers["authorization"] = f"Bearer {bearer_record.token if bearer_record else WEB_BEARER_TOKEN}"
-            if self.db:
+            if self.db and not settings.x_relay_url:
                 token_record = get_active_guest_token(self.db, self.proxy_id)
             guest_token = token_record.guest_token if token_record else await self._activate_guest(client)
-            if self.db and token_record is None:
+            if self.db and token_record is None and not settings.x_relay_url:
                 token_record = store_guest_token(self.db, self.proxy_id, guest_token)
             operation = await self._get_search_operation(client)
             try:
@@ -126,7 +126,7 @@ class InternalXApiCrawler:
                 if response.status_code in {401, 403} and self.db:
                     mark_web_bearer_token_failed(self.db, bearer_record, f"guest token 获取失败：HTTP {response.status_code}")
         if response.status_code >= 400:
-            raise InternalXApiError(f"guest token 获取失败：HTTP {response.status_code}")
+            raise InternalXApiError(f"guest token 获取失败：HTTP {response.status_code} {response.text[:200]}")
         token = response.json().get("guest_token")
         if not token:
             raise InternalXApiError("guest token 响应中没有 guest_token")

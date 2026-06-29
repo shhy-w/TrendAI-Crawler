@@ -13,6 +13,7 @@ UPSTREAM_PROXY = os.getenv("X_RELAY_UPSTREAM_PROXY", "http://127.0.0.1:7890")
 UPSTREAM_PROXY_AUTH = os.getenv("X_RELAY_UPSTREAM_PROXY_AUTH", "")
 COOKIE_JAR = os.getenv("X_RELAY_COOKIE_JAR", "/tmp/x-relay-cookies.txt")
 CURL_BIN = os.getenv("X_RELAY_CURL_BIN", "curl")
+RELAY_VERSION = "2026-06-29-cookie-jar"
 
 app = FastAPI(title="X Relay")
 
@@ -30,6 +31,7 @@ class FetchRequest(BaseModel):
 def health():
     return {
         "status": "ok",
+        "version": RELAY_VERSION,
         "upstream_proxy": _redact_proxy_url(UPSTREAM_PROXY),
         "upstream_proxy_auth": "configured" if UPSTREAM_PROXY_AUTH else "none",
         "cookie_jar": COOKIE_JAR,
