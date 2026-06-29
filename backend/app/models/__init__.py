@@ -6,5 +6,16 @@ from app.models.media import Media
 from app.models.post import Post
 from app.models.proxy import Proxy
 from app.models.query_id_cache import QueryIdCache
+from app.models.web_bearer_token import WebBearerToken
 
-__all__ = ["CrawlCache", "CrawlFailure", "CrawlJob", "GuestToken", "Media", "Post", "Proxy", "QueryIdCache"]
+__all__ = [
+    "CrawlCache",
+    "CrawlFailure",
+    "CrawlJob",
+    "GuestToken",
+    "Media",
+    "Post",
+    "Proxy",
+    "QueryIdCache",
+    "WebBearerToken",
+]

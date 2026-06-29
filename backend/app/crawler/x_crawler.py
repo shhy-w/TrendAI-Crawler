@@ -135,6 +135,8 @@ class PublicXCrawler(BasePlaywrightXCrawler):
                 return posts
         except InternalXApiError as exc:
             internal_error = exc
+            if "SearchTimeline" in str(exc):
+                raise XNoContentError(f"公开 API 通道未采集到内容：{exc}") from exc
 
         async with async_playwright() as playwright:
             launch_kwargs = {"headless": settings.crawler_headless}

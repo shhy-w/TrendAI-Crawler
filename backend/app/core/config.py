@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     crawler_debug_dir: str = "backend/.crawler-debug"
     crawler_cache_ttl_seconds: int = 900
     crawler_proxy_urls: str = ""
+    x_relay_url: str = ""
+    x_relay_token: str = ""
     default_keywords: str = "AI,vibe coding,agent"
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])

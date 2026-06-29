@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.crawler.errors import classify_exception
+from app.crawler.errors import CrawlFailureType, classify_exception
 from app.crawler.x_crawler import XCrawler
 from app.db.session import SessionLocal
 from app.models.crawl_failure import CrawlFailure
@@ -85,7 +85,12 @@ async def _run_crawl_job(job_id: int) -> None:
                 )
             )
             db.commit()
-            mark_proxy_failure(db, proxy if "proxy" in locals() else None, classified.message)
+            if classified.failure_type in {
+                CrawlFailureType.NETWORK,
+                CrawlFailureType.RATE_LIMITED,
+                CrawlFailureType.GUEST_TOKEN_DENIED,
+            }:
+                mark_proxy_failure(db, proxy if "proxy" in locals() else None, classified.message)
     finally:
         db.close()
 

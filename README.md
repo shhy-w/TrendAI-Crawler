@@ -65,3 +65,23 @@ npm run dev
 3. 失败诊断：保存 HTML、截图和元信息到 `CRAWLER_DEBUG_DIR`。
 
 X 页面结构、公开访问策略和风控会变化。如果任务失败，请先查看 `crawl_jobs.error_message` 或后端日志。若错误是 `guest token 获取失败：HTTP 401`，说明当前网络/IP 下 X 已拒绝匿名 guest token；要达到商业工具稳定性，需要继续引入代理池、账号池或第三方数据源。
+
+## X Relay
+
+如果本机直连 X 不稳定，可以在能稳定访问 X 的服务器上部署 `backend/scripts/x_relay.py`。本地后端通过 `X_RELAY_URL` 调用 relay，relay 再走服务器本机的 `X_RELAY_UPSTREAM_PROXY` 访问 X。脚本默认只允许转发到 `x.com`、`twitter.com`、`api.twitter.com` 和 `abs.twimg.com`，并建议配置 `X_RELAY_TOKEN`，不要暴露成开放代理。
+
+服务器示例：
+
+```bash
+cd /opt/x-relay
+export X_RELAY_TOKEN=your-relay-token
+export X_RELAY_UPSTREAM_PROXY=http://127.0.0.1:7890
+python3 -m uvicorn x_relay:app --host 0.0.0.0 --port 8787
+```
+
+本地 `.env` 示例：
+
+```bash
+X_RELAY_URL=http://your-server-ip:8787
+X_RELAY_TOKEN=your-relay-token
+```

@@ -21,7 +21,7 @@ class ClassifiedError:
 
 
 def classify_exception(exc: Exception) -> ClassifiedError:
-    message = str(exc)
+    message = str(exc) or exc.__class__.__name__
     lowered = message.lower()
     if "guest token" in lowered and ("401" in lowered or "403" in lowered):
         return ClassifiedError(CrawlFailureType.GUEST_TOKEN_DENIED, message, _extract_debug_path(message))

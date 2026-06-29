@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.guest_token import GuestToken, GuestTokenStatus
 from app.models.query_id_cache import QueryIdCache
+from app.models.web_bearer_token import WebBearerToken, WebBearerTokenStatus
 
 
 def get_active_guest_token(db: Session, proxy_id: int | None) -> GuestToken | None:
@@ -39,6 +40,42 @@ def mark_guest_token_failed(db: Session, token: GuestToken | None, message: str)
     if not token:
         return
     token.status = GuestTokenStatus.FAILED
+    token.failure_count += 1
+    token.last_error = message[:1000]
+    db.commit()
+
+
+def get_active_web_bearer_token(db: Session) -> WebBearerToken | None:
+    now = datetime.now(timezone.utc)
+    return db.scalar(
+        select(WebBearerToken)
+        .where(WebBearerToken.status == WebBearerTokenStatus.ACTIVE)
+        .where(WebBearerToken.expires_at > now)
+        .order_by(WebBearerToken.updated_at.desc())
+        .limit(1)
+    )
+
+
+def store_web_bearer_token(db: Session, token: str, source_url: str | None) -> WebBearerToken:
+    cached = get_active_web_bearer_token(db)
+    if cached is None:
+        cached = WebBearerToken(token=token, status=WebBearerTokenStatus.ACTIVE, expires_at=datetime.now(timezone.utc))
+        db.add(cached)
+    cached.token = token
+    cached.source_url = source_url
+    cached.status = WebBearerTokenStatus.ACTIVE
+    cached.last_error = None
+    cached.expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+    cached.last_success_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(cached)
+    return cached
+
+
+def mark_web_bearer_token_failed(db: Session, token: WebBearerToken | None, message: str) -> None:
+    if not token:
+        return
+    token.status = WebBearerTokenStatus.FAILED
     token.failure_count += 1
     token.last_error = message[:1000]
     db.commit()

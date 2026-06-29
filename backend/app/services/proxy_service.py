@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.crawler.internal_api import InternalXApiCrawler, WEB_BEARER_TOKEN
 from app.models.proxy import Proxy, ProxyStatus
 from app.schemas.operations import ProxyCheckResult
 
@@ -88,15 +89,31 @@ async def check_proxy(db: Session, proxy: Proxy) -> ProxyCheckResult:
             follow_redirects=True,
             proxies=proxy.proxy_url,
             headers={
-                "authorization": (
-                    "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAA"
-                    "kPxtR8GyrDMwUeUGQ8QFw8FyH0U%3D"
-                    "CqHbxTnTn4j1nmrtuKqhoJkgS85FzJJGRwjiM5mT"
-                ),
                 "user-agent": "Mozilla/5.0 Chrome/130.0.0.0 Safari/537.36",
+                "origin": "https://x.com",
+                "referer": "https://x.com/",
             },
         ) as client:
+            bearer = await InternalXApiCrawler(proxy_url=proxy.proxy_url, db=db, proxy_id=proxy.id)._ensure_web_bearer(client)
+            client.headers["authorization"] = f"Bearer {bearer.token if bearer else WEB_BEARER_TOKEN}"
             response = await client.post("https://api.twitter.com/1.1/guest/activate.json")
+            if response.status_code in {401, 403}:
+                reachability_response = await client.get("https://api.twitter.com/robots.txt")
+                if reachability_response.status_code < 500:
+                    proxy.status = ProxyStatus.ACTIVE
+                    proxy.last_error = f"guest token 获取失败：HTTP {response.status_code}"
+                    proxy.last_checked_at = datetime.now(timezone.utc)
+                    proxy.cooldown_until = None
+                    db.commit()
+                    return ProxyCheckResult(
+                        proxy_id=proxy.id,
+                        status=proxy.status,
+                        message=(
+                            f"代理网络可达，但 guest token 获取失败：HTTP {response.status_code}。"
+                            "需要更新 X Web Bearer 或切换采集策略。"
+                        ),
+                        guest_token_ok=False,
+                    )
         if response.status_code < 400 and response.json().get("guest_token"):
             proxy.status = ProxyStatus.ACTIVE
             proxy.success_count += 1
@@ -112,7 +129,7 @@ async def check_proxy(db: Session, proxy: Proxy) -> ProxyCheckResult:
             )
         message = f"guest token 获取失败：HTTP {response.status_code}"
     except Exception as exc:
-        message = str(exc)
+        message = str(exc) or exc.__class__.__name__
 
     proxy.failure_count += 1
     proxy.last_error = message[:1000]
