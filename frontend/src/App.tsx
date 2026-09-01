@@ -11,9 +11,10 @@ import {
   listSources,
   openLogin,
   updateSource,
+  updateAccountProtection,
   verifySession,
 } from './lib/api';
-import type { CrawlerSession, CrawlJob, CrawlMode, Note, NoteFilters, NoteStats, Source, SourceType } from './types/api';
+import type { AccountProtectionSettings, CrawlerSession, CrawlJob, CrawlMode, Note, NoteFilters, NoteStats, Source, SourceType } from './types/api';
 import { JobsPage } from './components/JobsPage';
 import { NewJobDialog } from './components/NewJobDialog';
 import { NoteDetail } from './components/NoteDetail';
@@ -47,13 +48,13 @@ export default function App() {
   const hasRunningJob = useMemo(() => jobs.some((job) => ['pending', 'running'].includes(job.status)), [jobs]);
   const sessionBusy = session?.status === 'login_running' || session?.status === 'verifying';
 
-  async function refreshNotes(nextFilters = filters) {
-    setLoadingNotes(true);
+  async function refreshNotes(nextFilters = filters, silent = false) {
+    if (!silent) setLoadingNotes(true);
     try {
       const result = await listNotes(nextFilters);
       setNotes(result.items); setNoteTotal(result.total);
     } catch (err) { reportError(err); }
-    finally { setLoadingNotes(false); }
+    finally { if (!silent) setLoadingNotes(false); }
   }
 
   async function refreshOverview() {
@@ -73,9 +74,11 @@ export default function App() {
   }, [filters]);
   useEffect(() => {
     if (!hasRunningJob && !sessionBusy) return;
-    const timer = window.setInterval(() => void refreshOverview(), 3500);
+    const timer = window.setInterval(() => {
+      void Promise.all([refreshOverview(), refreshNotes(filters, true)]);
+    }, 3500);
     return () => window.clearInterval(timer);
-  }, [hasRunningJob, sessionBusy]);
+  }, [hasRunningJob, sessionBusy, filters]);
 
   function reportError(value: unknown) { setError(value instanceof Error ? value.message : '操作失败，请稍后重试。'); }
 
@@ -118,12 +121,19 @@ export default function App() {
     finally { setWorking(false); }
   }
 
+  async function handleUpdateProtection(settings: AccountProtectionSettings) {
+    setWorking(true); setError(null);
+    try { setSession(await updateAccountProtection(settings)); }
+    catch (err) { reportError(err); throw err; }
+    finally { setWorking(false); }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark">R</span><div><strong>RedScope</strong><small>小红书内容研究台</small></div></div>
         <div className="top-actions">
-          <button className={`session-health status-${session?.status ?? 'public'}`} onClick={() => setPage('session')}><span />{session?.status === 'active' ? '登录模式' : sessionBusy ? (statusLabel[session?.status ?? ''] ?? '处理中') : '匿名模式'}</button>
+          <button className={`session-health status-${session?.status ?? 'public'}`} onClick={() => setPage('session')}><span />{session?.status === 'active' ? '登录模式' : session?.status === 'protection_blocked' ? statusLabel.protection_blocked : sessionBusy ? (statusLabel[session?.status ?? ''] ?? '处理中') : '匿名模式'}</button>
           <button className="icon-button" title="任务通知" aria-label="任务通知" onClick={() => setPage('jobs')}><Bell size={18} /></button>
           <button className="primary-button" onClick={() => setShowJobDialog(true)}><Plus size={17} />新建采集</button>
         </div>
@@ -131,7 +141,7 @@ export default function App() {
       {error ? <div className="error-banner" role="alert"><AlertCircle size={18} /><span>{error}</span><button aria-label="关闭错误提示" title="关闭" onClick={() => setError(null)}><X size={17} /></button></div> : null}
       <div className="workspace">
         <nav className="sidebar" aria-label="主导航">
-          <NavButton active={page === 'library'} icon={<Library size={18} />} label="笔记库" onClick={() => setPage('library')} />
+          <NavButton active={page === 'library'} icon={<Library size={18} />} label="笔记库" onClick={() => { setPage('library'); void refreshNotes(filters); }} />
           <NavButton active={page === 'jobs'} icon={<Activity size={18} />} label="采集任务" onClick={() => setPage('jobs')} />
           <NavButton active={page === 'sources'} icon={<Rss size={18} />} label="信源管理" onClick={() => setPage('sources')} />
           <span className="nav-section-label">运维</span>
@@ -141,11 +151,11 @@ export default function App() {
           {page === 'library' ? <NotesPage notes={notes} stats={stats} sources={sources} total={noteTotal} loading={loadingNotes} filters={filters} view={noteView} onFiltersChange={setFilters} onViewChange={setNoteView} onSelect={setSelectedNote} /> : null}
           {page === 'jobs' ? <JobsPage jobs={jobs} loading={working} onRefresh={() => void refreshOverview()} /> : null}
           {page === 'sources' ? <SourcesPage sources={sources} onCreate={handleCreateSource} onToggle={handleToggleSource} onDelete={handleDeleteSource} /> : null}
-          {page === 'session' ? <SessionPage session={session} loading={working} onVerify={handleVerifySession} onLogin={handleOpenLogin} /> : null}
+          {page === 'session' ? <SessionPage session={session} loading={working} onVerify={handleVerifySession} onLogin={handleOpenLogin} onUpdateProtection={handleUpdateProtection} /> : null}
         </main>
       </div>
       <NoteDetail note={selectedNote} sources={sources} onClose={() => setSelectedNote(null)} />
-      <NewJobDialog open={showJobDialog} sources={sources} loading={working} onClose={() => setShowJobDialog(false)} onCreate={handleCreateJob} onGoSources={() => { setShowJobDialog(false); setPage('sources'); }} />
+      <NewJobDialog open={showJobDialog} sources={sources} sessionActive={session?.status === 'active'} loading={working} onClose={() => setShowJobDialog(false)} onCreate={handleCreateJob} onGoSources={() => { setShowJobDialog(false); setPage('sources'); }} />
     </div>
   );
 }

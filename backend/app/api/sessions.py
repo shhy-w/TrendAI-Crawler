@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.models.crawler_session import CrawlerSession, CrawlerSessionStatus
-from app.schemas.crawler_session import CrawlerSessionRead
+from app.schemas.crawler_session import AccountProtectionUpdate, CrawlerSessionRead
+from app.services.account_protection_service import update_account_protection
 from app.services.session_service import get_or_create_session, run_login_session, verify_session
 
 
@@ -33,3 +34,18 @@ def login_primary_session(background_tasks: BackgroundTasks, db: Session = Depen
     db.refresh(session)
     background_tasks.add_task(run_login_session)
     return session
+
+
+@router.patch("/primary/protection", response_model=CrawlerSessionRead)
+def update_primary_protection(
+    payload: AccountProtectionUpdate,
+    db: Session = Depends(get_db),
+) -> CrawlerSession:
+    return update_account_protection(
+        db,
+        protection_enabled=payload.protection_enabled,
+        daily_request_limit=payload.daily_request_limit,
+        cooldown_seconds=payload.cooldown_seconds,
+        failure_threshold=payload.failure_threshold,
+        lockout_minutes=payload.lockout_minutes,
+    )

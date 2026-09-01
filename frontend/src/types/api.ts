@@ -58,6 +58,7 @@ export type Source = {
   source_type: SourceType;
   target: string;
   enabled: boolean;
+  public_supported: boolean;
   last_run_at: string | null;
   last_success_at: string | null;
   last_result_count: number;
@@ -107,9 +108,24 @@ export type CrawlerSession = {
   status: string;
   last_verified_at: string | null;
   last_error: string | null;
+  protection_enabled: boolean;
+  daily_request_limit: number;
+  daily_request_count: number;
+  daily_request_date: string | null;
+  cooldown_seconds: number;
+  failure_threshold: number;
+  lockout_minutes: number;
+  consecutive_failures: number;
+  last_request_at: string | null;
+  blocked_until: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type AccountProtectionSettings = Pick<
+  CrawlerSession,
+  'protection_enabled' | 'daily_request_limit' | 'cooldown_seconds' | 'failure_threshold' | 'lockout_minutes'
+>;
 
 export type NoteFilters = {
   page: number;

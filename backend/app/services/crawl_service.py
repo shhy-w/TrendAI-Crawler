@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import settings
 from app.crawler.errors import CrawlFailureType, classify_exception
 from app.crawler.types import CrawledNote
 from app.crawler.xhs_crawler import XHSCrawler
@@ -17,7 +18,12 @@ from app.models.media import Media
 from app.models.note import Note, NoteCompleteness
 from app.models.note_metric_snapshot import NoteMetricSnapshot
 from app.models.note_source import NoteSource
-from app.models.source import Source
+from app.models.source import Source, SourceType
+from app.services.account_protection_service import (
+    record_authenticated_failure,
+    record_authenticated_success,
+    reserve_authenticated_access,
+)
 from app.services.cache_service import get_cached_notes, set_cached_notes
 from app.services.session_service import get_or_create_session
 
@@ -81,6 +87,7 @@ async def _run_crawl_job(job_id: int) -> None:
         failed_items = 0
         first_failure_type: str | None = None
         for item in job.items:
+            used_authenticated = False
             item.status = CrawlJobStatus.RUNNING.value
             item.started_at = datetime.now(timezone.utc)
             db.commit()
@@ -94,12 +101,29 @@ async def _run_crawl_job(job_id: int) -> None:
                     job.crawl_mode,
                 )
                 if notes is None:
+                    effective_mode = job.crawl_mode
+                    if effective_mode == CrawlMode.AUTO:
+                        effective_mode = (
+                            CrawlMode.PUBLIC
+                            if item.source_type == SourceType.EXPLORE
+                            else CrawlMode.AUTHENTICATED
+                        )
+                    used_authenticated = effective_mode == CrawlMode.AUTHENTICATED
+                    if used_authenticated:
+                        wait_seconds = reserve_authenticated_access(
+                            db,
+                            cost=1 + settings.crawler_scroll_rounds,
+                        )
+                        if wait_seconds:
+                            await asyncio.sleep(wait_seconds)
                     notes = await crawler.crawl_source(
                         item.source_type,
                         item.target,
                         job.max_notes_per_source,
-                        job.crawl_mode,
+                        effective_mode,
                     )
+                    if used_authenticated:
+                        record_authenticated_success(db)
                     set_cached_notes(
                         db,
                         item.source_type,
@@ -121,10 +145,17 @@ async def _run_crawl_job(job_id: int) -> None:
                 item = db.get(CrawlJobItem, item.id)
                 source = db.get(Source, item.source_id) if item and item.source_id else None
                 classified = classify_exception(exc)
+                if used_authenticated:
+                    record_authenticated_failure(db, classified.failure_type, classified.message)
                 failed_items += 1
                 first_failure_type = first_failure_type or classified.failure_type
                 if item:
-                    item.status = CrawlJobStatus.FAILED.value
+                    if classified.failure_type == CrawlFailureType.AUTH_REQUIRED:
+                        item.status = "needs_auth"
+                    elif classified.failure_type == CrawlFailureType.PROTECTION_BLOCKED:
+                        item.status = "protection_blocked"
+                    else:
+                        item.status = CrawlJobStatus.FAILED.value
                     item.error_message = classified.message[:1024]
                 if source:
                     source.last_run_at = datetime.now(timezone.utc)

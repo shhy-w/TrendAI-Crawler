@@ -31,10 +31,12 @@ export const statusLabel: Record<string, string> = {
   succeeded: '已完成',
   partial: '部分完成',
   failed: '失败',
+  needs_auth: '需要登录',
   active: '正常',
   auth_required: '需要登录',
   verifying: '验证中',
   login_running: '等待扫码',
+  protection_blocked: '账号保护暂停',
   error: '异常',
   unknown: '未验证',
 };

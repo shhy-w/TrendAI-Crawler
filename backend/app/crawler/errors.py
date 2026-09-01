@@ -7,6 +7,7 @@ class CrawlFailureType:
     AUTH_REQUIRED = "auth_required"
     CAPTCHA_REQUIRED = "captcha_required"
     ACCESS_RESTRICTED = "access_restricted"
+    PROTECTION_BLOCKED = "protection_blocked"
     RATE_LIMITED = "rate_limited"
     NO_CONTENT = "no_content"
     NETWORK = "network"
@@ -24,6 +25,8 @@ class ClassifiedError:
 def classify_exception(exc: Exception) -> ClassifiedError:
     message = str(exc) or exc.__class__.__name__
     lowered = message.lower()
+    if "账号保护" in message:
+        return ClassifiedError(CrawlFailureType.PROTECTION_BLOCKED, message, _extract_debug_path(message))
     if "安全验证" in message or "captcha" in lowered or "滑块" in message:
         return ClassifiedError(CrawlFailureType.CAPTCHA_REQUIRED, message, _extract_debug_path(message))
     if ("ip" in lowered and "风险" in message) or "网络环境" in message:

@@ -63,7 +63,7 @@ class XHSCrawler:
             try:
                 return await self._crawl_authenticated(source_type, target, limit)
             except XHSAuthRequiredError as auth_error:
-                raise XHSNoContentError(
+                raise XHSAuthRequiredError(
                     f"匿名通道未获取到内容：{public_error} 登录通道不可用：{auth_error}"
                 ) from auth_error
 
@@ -88,6 +88,15 @@ class XHSCrawler:
             notes = extract_notes_from_html(response.text)
             if notes:
                 return notes[:limit]
+            if source_type in {SourceType.KEYWORD, SourceType.PROFILE, SourceType.NOTE}:
+                source_label = {
+                    SourceType.KEYWORD: "关键词",
+                    SourceType.PROFILE: "博主主页",
+                    SourceType.NOTE: "单篇笔记",
+                }[source_type]
+                raise XHSAuthRequiredError(
+                    f"{source_label}信源没有返回匿名公开内容，请登录后使用自动模式或登录模式。"
+                )
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=settings.crawler_headless)

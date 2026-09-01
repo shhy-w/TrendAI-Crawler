@@ -35,3 +35,7 @@ class Source(TimestampMixin, Base):
         back_populates="source",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def public_supported(self) -> bool:
+        return self.source_type == SourceType.EXPLORE

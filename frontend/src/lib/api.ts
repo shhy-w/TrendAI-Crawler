@@ -1,5 +1,6 @@
 import type {
   CrawlerSession,
+  AccountProtectionSettings,
   CrawlJob,
   CrawlMode,
   Note,
@@ -53,6 +54,7 @@ export const listJobs = () => request<CrawlJob[]>('/api/crawl-jobs');
 export const getSession = () => request<CrawlerSession>('/api/sessions/primary');
 export const verifySession = () => request<CrawlerSession>('/api/sessions/primary/verify', { method: 'POST' });
 export const openLogin = () => request<CrawlerSession>('/api/sessions/primary/login', { method: 'POST' });
+export const updateAccountProtection = (settings: AccountProtectionSettings) => request<CrawlerSession>('/api/sessions/primary/protection', { method: 'PATCH', body: JSON.stringify(settings) });
 
 export function createSource(name: string, sourceType: SourceType, target: string): Promise<Source> {
   return request<Source>('/api/sources', {

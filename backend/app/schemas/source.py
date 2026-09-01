@@ -22,6 +22,7 @@ class SourceRead(BaseModel):
     source_type: str
     target: str
     enabled: bool
+    public_supported: bool
     last_run_at: Optional[datetime]
     last_success_at: Optional[datetime]
     last_result_count: int
