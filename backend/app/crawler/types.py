@@ -19,6 +19,7 @@ class CrawledMedia:
 class CrawledNote:
     platform_note_id: str
     note_type: str
+    completeness: str
     title: str
     content: str
     note_url: str

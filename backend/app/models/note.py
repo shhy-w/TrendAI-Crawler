@@ -10,12 +10,20 @@ from app.db.base import Base
 from app.models.mixins import TimestampMixin, utcnow
 
 
+class NoteCompleteness:
+    CARD = "card"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+    RANK = {CARD: 0, PARTIAL: 1, COMPLETE: 2}
+
+
 class Note(TimestampMixin, Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     platform_note_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     note_type: Mapped[str] = mapped_column(String(32), default="normal", index=True, nullable=False)
+    completeness: Mapped[str] = mapped_column(String(32), default=NoteCompleteness.CARD, index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     author_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)

@@ -19,6 +19,7 @@ export function formatDate(value: string | null, fallback = '尚未运行'): str
 }
 
 export const sourceTypeLabel: Record<string, string> = {
+  explore: '发现页',
   keyword: '关键词',
   profile: '博主主页',
   note: '笔记链接',
@@ -36,4 +37,16 @@ export const statusLabel: Record<string, string> = {
   login_running: '等待扫码',
   error: '异常',
   unknown: '未验证',
+};
+
+export const crawlModeLabel: Record<string, string> = {
+  auto: '自动模式',
+  public: '匿名模式',
+  authenticated: '登录模式',
+};
+
+export const completenessLabel: Record<string, string> = {
+  card: '卡片数据',
+  partial: '部分详情',
+  complete: '完整详情',
 };

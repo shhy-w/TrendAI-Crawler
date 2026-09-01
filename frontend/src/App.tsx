@@ -13,7 +13,7 @@ import {
   updateSource,
   verifySession,
 } from './lib/api';
-import type { CrawlerSession, CrawlJob, Note, NoteFilters, NoteStats, Source, SourceType } from './types/api';
+import type { CrawlerSession, CrawlJob, CrawlMode, Note, NoteFilters, NoteStats, Source, SourceType } from './types/api';
 import { JobsPage } from './components/JobsPage';
 import { NewJobDialog } from './components/NewJobDialog';
 import { NoteDetail } from './components/NoteDetail';
@@ -97,9 +97,9 @@ export default function App() {
     catch (err) { reportError(err); }
   }
 
-  async function handleCreateJob(sourceIds: number[], maxNotes: number) {
+  async function handleCreateJob(sourceIds: number[], maxNotes: number, crawlMode: CrawlMode) {
     setWorking(true); setError(null);
-    try { await createJob(sourceIds, maxNotes); setJobs(await listJobs()); setShowJobDialog(false); setPage('jobs'); }
+    try { await createJob(sourceIds, maxNotes, crawlMode); setJobs(await listJobs()); setShowJobDialog(false); setPage('jobs'); }
     catch (err) { reportError(err); }
     finally { setWorking(false); }
   }
@@ -123,7 +123,7 @@ export default function App() {
       <header className="topbar">
         <div className="brand"><span className="brand-mark">R</span><div><strong>RedScope</strong><small>小红书内容研究台</small></div></div>
         <div className="top-actions">
-          <button className={`session-health status-${session?.status ?? 'unknown'}`} onClick={() => setPage('session')}><span />{session ? (statusLabel[session.status] ?? session.status) : '检查会话'}</button>
+          <button className={`session-health status-${session?.status ?? 'public'}`} onClick={() => setPage('session')}><span />{session?.status === 'active' ? '登录模式' : sessionBusy ? (statusLabel[session?.status ?? ''] ?? '处理中') : '匿名模式'}</button>
           <button className="icon-button" title="任务通知" aria-label="任务通知" onClick={() => setPage('jobs')}><Bell size={18} /></button>
           <button className="primary-button" onClick={() => setShowJobDialog(true)}><Plus size={17} />新建采集</button>
         </div>

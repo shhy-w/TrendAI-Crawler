@@ -11,17 +11,24 @@ from app.crawler.types import CrawledMedia, CrawledNote
 from app.models.crawl_cache import CrawlCache
 
 
-def get_cached_notes(db: Session, source_type: str, target: str, limit: int) -> list[CrawledNote] | None:
+def get_cached_notes(db: Session, source_type: str, target: str, limit: int, mode: str = "auto") -> list[CrawledNote] | None:
     now = datetime.now(timezone.utc)
     db.execute(delete(CrawlCache).where(CrawlCache.expires_at <= now))
-    record = db.scalar(select(CrawlCache).where(CrawlCache.cache_key == _cache_key(source_type, target, limit)))
+    record = db.scalar(select(CrawlCache).where(CrawlCache.cache_key == _cache_key(source_type, target, limit, mode)))
     if not record:
         return None
     return [_deserialize_note(item) for item in record.payload.get("items", [])]
 
 
-def set_cached_notes(db: Session, source_type: str, target: str, limit: int, notes: list[CrawledNote]) -> None:
-    key = _cache_key(source_type, target, limit)
+def set_cached_notes(
+    db: Session,
+    source_type: str,
+    target: str,
+    limit: int,
+    notes: list[CrawledNote],
+    mode: str = "auto",
+) -> None:
+    key = _cache_key(source_type, target, limit, mode)
     record = db.scalar(select(CrawlCache).where(CrawlCache.cache_key == key))
     if record is None:
         record = CrawlCache(cache_key=key, payload={})
@@ -31,15 +38,16 @@ def set_cached_notes(db: Session, source_type: str, target: str, limit: int, not
     db.commit()
 
 
-def _cache_key(source_type: str, target: str, limit: int) -> str:
+def _cache_key(source_type: str, target: str, limit: int, mode: str) -> str:
     digest = hashlib.sha256(target.encode("utf-8")).hexdigest()
-    return f"xhs:{source_type}:{limit}:{digest}"
+    return f"xhs:{mode}:{source_type}:{limit}:{digest}"
 
 
 def _serialize_note(note: CrawledNote) -> dict:
     return {
         "platform_note_id": note.platform_note_id,
         "note_type": note.note_type,
+        "completeness": note.completeness,
         "title": note.title,
         "content": note.content,
         "note_url": note.note_url,
@@ -62,6 +70,7 @@ def _deserialize_note(payload: dict) -> CrawledNote:
     return CrawledNote(
         platform_note_id=payload["platform_note_id"],
         note_type=payload.get("note_type", "normal"),
+        completeness=payload.get("completeness", "card"),
         title=payload.get("title", ""),
         content=payload.get("content", ""),
         note_url=payload["note_url"],

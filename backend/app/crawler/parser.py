@@ -112,6 +112,7 @@ def build_crawled_note(card: dict, envelope: dict | None = None) -> CrawledNote 
     return CrawledNote(
         platform_note_id=note_id,
         note_type=str(card.get("type") or "normal"),
+        completeness=_completeness(card),
         title=str(card.get("title") or card.get("display_title") or "").strip(),
         content=str(card.get("desc") or card.get("content") or "").strip(),
         note_url=note_url,
@@ -131,6 +132,16 @@ def build_crawled_note(card: dict, envelope: dict | None = None) -> CrawledNote 
 
 def _looks_like_note(value: dict) -> bool:
     return bool((value.get("note_id") or value.get("noteId")) and (value.get("user") or value.get("interact_info") or value.get("image_list")))
+
+
+def _completeness(card: dict) -> str:
+    has_content = bool(str(card.get("desc") or card.get("content") or "").strip())
+    has_detail_media = bool(card.get("image_list") or card.get("imageList") or card.get("video"))
+    if has_content and has_detail_media:
+        return "complete"
+    if has_content:
+        return "partial"
+    return "card"
 
 
 def _image_url(image: dict) -> str | None:

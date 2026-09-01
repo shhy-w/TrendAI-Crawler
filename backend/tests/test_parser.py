@@ -43,5 +43,6 @@ def test_extract_notes_from_search_payload() -> None:
     assert notes[0].author_name == "效率研究员"
     assert notes[0].like_count == 12000
     assert notes[0].collect_count == 3200
+    assert notes[0].completeness == "card"
     assert "xsec_token=token-value" in notes[0].note_url
     assert notes[0].media_items[0].media_url == "https://img.example/cover.jpg"

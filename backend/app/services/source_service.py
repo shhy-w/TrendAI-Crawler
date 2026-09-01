@@ -12,10 +12,13 @@ def create_source(db: Session, name: str, source_type: str, target: str) -> Sour
     normalized_name = name.strip()
     normalized_target = target.strip()
     if source_type not in SourceType.VALUES:
-        raise ValueError("信源类型必须是 keyword、profile 或 note。")
+        raise ValueError("信源类型必须是 explore、keyword、profile 或 note。")
     if not normalized_name or not normalized_target:
         raise ValueError("信源名称和目标不能为空。")
-    if source_type != SourceType.KEYWORD:
+    if source_type == SourceType.EXPLORE:
+        if normalized_target not in {"homefeed_recommend", "fashion_v3", "food_v3", "travel_v3", "career_v3"}:
+            raise ValueError("不支持的发现页频道。")
+    elif source_type != SourceType.KEYWORD:
         parsed = urlparse(normalized_target)
         if parsed.scheme != "https" or parsed.netloc not in {"xiaohongshu.com", "www.xiaohongshu.com"}:
             raise ValueError("博主和笔记信源必须使用 https://www.xiaohongshu.com 链接。")

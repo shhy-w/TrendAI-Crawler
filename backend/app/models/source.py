@@ -11,10 +11,11 @@ from app.models.mixins import TimestampMixin
 
 
 class SourceType:
+    EXPLORE = "explore"
     KEYWORD = "keyword"
     PROFILE = "profile"
     NOTE = "note"
-    VALUES = {KEYWORD, PROFILE, NOTE}
+    VALUES = {EXPLORE, KEYWORD, PROFILE, NOTE}
 
 
 class Source(TimestampMixin, Base):

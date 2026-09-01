@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class CrawlJobCreate(BaseModel):
     source_ids: list[int] = Field(min_length=1)
     max_notes_per_source: int = Field(default=20, ge=1, le=100)
+    crawl_mode: str = Field(default="auto", pattern="^(auto|public|authenticated)$")
 
 
 class CrawlJobItemRead(BaseModel):
@@ -30,6 +31,7 @@ class CrawlJobItemRead(BaseModel):
 class CrawlJobRead(BaseModel):
     id: int
     status: str
+    crawl_mode: str
     max_notes_per_source: int
     total_sources: int
     completed_sources: int

@@ -10,11 +10,11 @@ from app.crawler.errors import CrawlFailureType, classify_exception
 from app.crawler.types import CrawledNote
 from app.crawler.xhs_crawler import XHSCrawler
 from app.db.session import SessionLocal
-from app.models.crawl_job import CrawlJob, CrawlJobStatus
+from app.models.crawl_job import CrawlJob, CrawlJobStatus, CrawlMode
 from app.models.crawl_job_item import CrawlJobItem
 from app.models.crawler_session import CrawlerSessionStatus
 from app.models.media import Media
-from app.models.note import Note
+from app.models.note import Note, NoteCompleteness
 from app.models.note_metric_snapshot import NoteMetricSnapshot
 from app.models.note_source import NoteSource
 from app.models.source import Source
@@ -22,7 +22,14 @@ from app.services.cache_service import get_cached_notes, set_cached_notes
 from app.services.session_service import get_or_create_session
 
 
-def create_crawl_job(db: Session, source_ids: list[int], max_notes_per_source: int) -> CrawlJob:
+def create_crawl_job(
+    db: Session,
+    source_ids: list[int],
+    max_notes_per_source: int,
+    crawl_mode: str = CrawlMode.AUTO,
+) -> CrawlJob:
+    if crawl_mode not in CrawlMode.VALUES:
+        raise ValueError("采集模式必须是 auto、public 或 authenticated。")
     normalized_ids = list(dict.fromkeys(source_ids))
     sources = list(db.scalars(select(Source).where(Source.id.in_(normalized_ids), Source.enabled.is_(True))))
     source_by_id = {source.id: source for source in sources}
@@ -31,6 +38,7 @@ def create_crawl_job(db: Session, source_ids: list[int], max_notes_per_source: i
         raise ValueError("至少选择一个已启用的信源。")
     job = CrawlJob(
         status=CrawlJobStatus.PENDING.value,
+        crawl_mode=crawl_mode,
         max_notes_per_source=max_notes_per_source,
         total_sources=len(ordered_sources),
         completed_sources=0,
@@ -78,10 +86,28 @@ async def _run_crawl_job(job_id: int) -> None:
             db.commit()
             source = db.get(Source, item.source_id) if item.source_id else None
             try:
-                notes = get_cached_notes(db, item.source_type, item.target, job.max_notes_per_source)
+                notes = get_cached_notes(
+                    db,
+                    item.source_type,
+                    item.target,
+                    job.max_notes_per_source,
+                    job.crawl_mode,
+                )
                 if notes is None:
-                    notes = await crawler.crawl_source(item.source_type, item.target, job.max_notes_per_source)
-                    set_cached_notes(db, item.source_type, item.target, job.max_notes_per_source, notes)
+                    notes = await crawler.crawl_source(
+                        item.source_type,
+                        item.target,
+                        job.max_notes_per_source,
+                        job.crawl_mode,
+                    )
+                    set_cached_notes(
+                        db,
+                        item.source_type,
+                        item.target,
+                        job.max_notes_per_source,
+                        notes,
+                        job.crawl_mode,
+                    )
                 item.discovered_count = len(notes)
                 item.saved_count = upsert_notes(db, notes, source)
                 item.status = CrawlJobStatus.SUCCEEDED.value
@@ -147,6 +173,8 @@ def upsert_notes(db: Session, crawled_notes: list[CrawledNote], source: Source |
             note = Note(platform_note_id=crawled.platform_note_id, title="", content="", note_url=crawled.note_url)
             db.add(note)
         note.note_type = crawled.note_type
+        if NoteCompleteness.RANK.get(crawled.completeness, 0) >= NoteCompleteness.RANK.get(note.completeness, 0):
+            note.completeness = crawled.completeness
         note.title = crawled.title or note.title
         note.content = crawled.content or note.content
         note.author_id = crawled.author_id or note.author_id

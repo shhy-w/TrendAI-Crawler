@@ -33,7 +33,10 @@ class Settings(BaseSettings):
 
     @property
     def profile_path(self) -> Path:
-        return Path(self.crawler_profile_dir).expanduser().resolve()
+        path = Path(self.crawler_profile_dir).expanduser()
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        return path.resolve()
 
     @property
     def debug_path(self) -> Path:

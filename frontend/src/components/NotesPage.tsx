@@ -1,6 +1,6 @@
 import { Bookmark, Grid2X2, Heart, Image as ImageIcon, List, MessageCircle, Search, Share2 } from 'lucide-react';
 import type { Note, NoteFilters, NoteStats, Source } from '../types/api';
-import { compactNumber } from '../lib/format';
+import { compactNumber, completenessLabel } from '../lib/format';
 
 type Props = {
   notes: Note[];
@@ -81,7 +81,7 @@ export function NotesPage({ notes, stats, sources, total, loading, filters, view
                 <div className="note-cover">
                   <ImageIcon size={24} aria-hidden="true" />
                   {imageUrl ? <img src={imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none'; }} /> : null}
-                  <span>{note.note_type === 'video' ? '视频' : `图文${note.media_items.length ? ` · ${note.media_items.length} 张` : ''}`}</span>
+                  <span>{note.note_type === 'video' ? '视频' : `图文${note.media_items.length ? ` · ${note.media_items.length} 张` : ''}`} · {completenessLabel[note.completeness] ?? note.completeness}</span>
                 </div>
                 <div className="note-body">
                   <h2>{note.title || note.content.slice(0, 48) || '未命名笔记'}</h2>

@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from playwright.async_api import BrowserContext, Page, Response, async_playwright
+from playwright.async_api import BrowserContext, Error as PlaywrightError, Page, Response, async_playwright
 
 from app.core.config import settings
 from app.crawler.parser import extract_notes_from_payload, parse_compact_count, parse_note_id
 from app.crawler.types import CrawledMedia, CrawledNote
+from app.models.crawl_job import CrawlMode
 from app.models.source import SourceType
 
 
@@ -31,13 +32,53 @@ class XHSNoContentError(RuntimeError):
     pass
 
 
+class XHSAccessRestrictedError(RuntimeError):
+    pass
+
+
 class XHSCrawler:
     def __init__(self, profile_dir: Path | None = None) -> None:
         self.profile_dir = profile_dir or settings.profile_path
 
-    async def crawl_source(self, source_type: str, target: str, limit: int) -> list[CrawledNote]:
+    async def crawl_source(
+        self,
+        source_type: str,
+        target: str,
+        limit: int,
+        mode: str = CrawlMode.AUTO,
+    ) -> list[CrawledNote]:
         if source_type not in SourceType.VALUES:
             raise ValueError(f"不支持的信源类型：{source_type}")
+        if mode not in CrawlMode.VALUES:
+            raise ValueError(f"不支持的采集模式：{mode}")
+        if mode == CrawlMode.PUBLIC:
+            return await self._crawl_public(source_type, target, limit)
+        if mode == CrawlMode.AUTHENTICATED:
+            return await self._crawl_authenticated(source_type, target, limit)
+        try:
+            return await self._crawl_public(source_type, target, limit)
+        except (XHSAuthRequiredError, XHSNoContentError) as public_error:
+            try:
+                return await self._crawl_authenticated(source_type, target, limit)
+            except XHSAuthRequiredError as auth_error:
+                raise XHSNoContentError(
+                    f"匿名通道未获取到内容：{public_error} 登录通道不可用：{auth_error}"
+                ) from auth_error
+
+    async def _crawl_public(self, source_type: str, target: str, limit: int) -> list[CrawledNote]:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=settings.crawler_headless)
+            context = await browser.new_context(
+                viewport={"width": 1440, "height": 1000},
+                locale="zh-CN",
+            )
+            try:
+                return await self._crawl_in_context(context, source_type, target, limit, CrawlMode.PUBLIC)
+            finally:
+                await context.close()
+                await browser.close()
+
+    async def _crawl_authenticated(self, source_type: str, target: str, limit: int) -> list[CrawledNote]:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(PROFILE_LOCK.acquire)
         try:
@@ -51,7 +92,7 @@ class XHSCrawler:
                 try:
                     if not await self._has_session(context):
                         raise XHSAuthRequiredError("小红书登录态不存在或已过期，请先在登录会话页面完成扫码登录。")
-                    return await self._crawl_in_context(context, source_type, target, limit)
+                    return await self._crawl_in_context(context, source_type, target, limit, CrawlMode.AUTHENTICATED)
                 finally:
                     await context.close()
         finally:
@@ -82,7 +123,14 @@ class XHSCrawler:
         finally:
             PROFILE_LOCK.release()
 
-    async def _crawl_in_context(self, context: BrowserContext, source_type: str, target: str, limit: int) -> list[CrawledNote]:
+    async def _crawl_in_context(
+        self,
+        context: BrowserContext,
+        source_type: str,
+        target: str,
+        limit: int,
+        mode: str,
+    ) -> list[CrawledNote]:
         page = context.pages[0] if context.pages else await context.new_page()
         page.set_default_timeout(settings.crawler_navigation_timeout_ms)
         notes: dict[str, CrawledNote] = {}
@@ -99,6 +147,9 @@ class XHSCrawler:
         await page.goto(self._source_url(source_type, target), wait_until="domcontentloaded")
         for _ in range(settings.crawler_scroll_rounds):
             await page.wait_for_timeout(settings.crawler_scroll_pause_ms)
+            if await self._has_access_restriction(page):
+                await self._write_debug_artifacts(page, target, "access_restricted")
+                raise XHSAccessRestrictedError("小红书限制了当前 IP 或网络环境，请更换可靠网络后重试。")
             if await self._has_captcha(page):
                 await self._write_debug_artifacts(page, target, "captcha")
                 raise XHSCaptchaRequiredError("小红书要求完成安全验证，任务已暂停，请在登录会话中人工处理。")
@@ -107,8 +158,22 @@ class XHSCrawler:
             await page.mouse.wheel(0, 1800)
         if response_tasks:
             await asyncio.gather(*list(response_tasks), return_exceptions=True)
+        await page.wait_for_timeout(400)
+        if await self._has_access_restriction(page):
+            await self._write_debug_artifacts(page, target, "access_restricted")
+            raise XHSAccessRestrictedError("小红书限制了当前 IP 或网络环境，请更换可靠网络后重试。")
 
-        for note in await self._parse_visible_notes(page):
+        try:
+            visible_notes = await self._parse_visible_notes(page)
+        except PlaywrightError as exc:
+            if "Execution context was destroyed" not in str(exc):
+                raise
+            await page.wait_for_load_state("domcontentloaded")
+            if await self._has_access_restriction(page):
+                await self._write_debug_artifacts(page, target, "access_restricted")
+                raise XHSAccessRestrictedError("小红书限制了当前 IP 或网络环境，请更换可靠网络后重试。") from exc
+            visible_notes = await self._parse_visible_notes(page)
+        for note in visible_notes:
             notes.setdefault(note.platform_note_id, note)
         if source_type == SourceType.NOTE and not notes:
             note = await self._parse_note_detail(page)
@@ -116,9 +181,10 @@ class XHSCrawler:
                 notes[note.platform_note_id] = note
         if not notes:
             await self._write_debug_artifacts(page, target, "empty")
-            if await self._has_blocking_login(page):
+            if mode == CrawlMode.AUTHENTICATED and await self._has_blocking_login(page):
                 raise XHSAuthRequiredError("小红书登录态已失效，请重新扫码登录。")
-            raise XHSNoContentError(f"未采集到笔记内容，已保存调试文件：{settings.debug_path}")
+            channel = "匿名" if mode == CrawlMode.PUBLIC else "登录"
+            raise XHSNoContentError(f"{channel}通道未采集到笔记内容，已保存调试文件：{settings.debug_path}")
         return list(notes.values())[:limit]
 
     async def _extract_response(self, response: Response, notes: dict[str, CrawledNote]) -> None:
@@ -149,6 +215,7 @@ class XHSCrawler:
                 CrawledNote(
                     platform_note_id=note_id,
                     note_type="normal",
+                    completeness="card",
                     title=(await title_locator.inner_text()).strip() if await title_locator.count() else "",
                     content="",
                     note_url=full_url,
@@ -181,6 +248,7 @@ class XHSCrawler:
         return CrawledNote(
             platform_note_id=note_id,
             note_type="normal",
+            completeness="complete" if content and images else "partial",
             title=title,
             content=content,
             note_url=page.url,
@@ -200,9 +268,26 @@ class XHSCrawler:
         return bool(await login_dialog.count() and await login_dialog.first.is_visible())
 
     async def _has_captcha(self, page: Page) -> bool:
-        return any(await page.get_by_text(text, exact=False).count() for text in ("请完成验证", "安全验证", "拖动滑块", "异常访问"))
+        for text in ("请完成验证", "安全验证", "拖动滑块", "异常访问"):
+            if await page.get_by_text(text, exact=False).count():
+                return True
+        return False
+
+    async def _has_access_restriction(self, page: Page) -> bool:
+        for _ in range(2):
+            if "/website-login/error" in page.url:
+                return True
+            try:
+                return bool(await page.get_by_text("IP存在风险", exact=False).count())
+            except PlaywrightError as exc:
+                if "Execution context was destroyed" not in str(exc):
+                    raise
+                await page.wait_for_load_state("domcontentloaded")
+        return "/website-login/error" in page.url
 
     def _source_url(self, source_type: str, target: str) -> str:
+        if source_type == SourceType.EXPLORE:
+            return f"https://www.xiaohongshu.com/explore?channel_id={quote_plus(target)}"
         if source_type == SourceType.KEYWORD:
             return f"https://www.xiaohongshu.com/search_result?keyword={quote_plus(target)}&source=web_search_result_notes"
         if not re.match(r"^https://(?:www\.)?xiaohongshu\.com/", target):

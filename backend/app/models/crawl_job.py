@@ -19,11 +19,19 @@ class CrawlJobStatus(str, Enum):
     FAILED = "failed"
 
 
+class CrawlMode:
+    AUTO = "auto"
+    PUBLIC = "public"
+    AUTHENTICATED = "authenticated"
+    VALUES = {AUTO, PUBLIC, AUTHENTICATED}
+
+
 class CrawlJob(TimestampMixin, Base):
     __tablename__ = "crawl_jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     status: Mapped[str] = mapped_column(String(32), index=True, default=CrawlJobStatus.PENDING.value, nullable=False)
+    crawl_mode: Mapped[str] = mapped_column(String(32), default=CrawlMode.AUTO, index=True, nullable=False)
     max_notes_per_source: Mapped[int] = mapped_column(Integer, nullable=False)
     total_sources: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     completed_sources: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

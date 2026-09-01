@@ -30,6 +30,7 @@ class NoteRead(BaseModel):
     id: int
     platform_note_id: str
     note_type: str
+    completeness: str
     title: str
     content: str
     author_id: Optional[str]

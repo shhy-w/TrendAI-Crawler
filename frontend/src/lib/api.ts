@@ -1,6 +1,7 @@
 import type {
   CrawlerSession,
   CrawlJob,
+  CrawlMode,
   Note,
   NoteFilters,
   NoteListResponse,
@@ -71,9 +72,9 @@ export function deleteSource(id: number): Promise<void> {
   return request<void>(`/api/sources/${id}`, { method: 'DELETE' });
 }
 
-export function createJob(sourceIds: number[], maxNotesPerSource: number): Promise<CrawlJob> {
+export function createJob(sourceIds: number[], maxNotesPerSource: number, crawlMode: CrawlMode): Promise<CrawlJob> {
   return request<CrawlJob>('/api/crawl-jobs', {
     method: 'POST',
-    body: JSON.stringify({ source_ids: sourceIds, max_notes_per_source: maxNotesPerSource }),
+    body: JSON.stringify({ source_ids: sourceIds, max_notes_per_source: maxNotesPerSource, crawl_mode: crawlMode }),
   });
 }

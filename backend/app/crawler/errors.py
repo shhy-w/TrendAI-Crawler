@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class CrawlFailureType:
     AUTH_REQUIRED = "auth_required"
     CAPTCHA_REQUIRED = "captcha_required"
+    ACCESS_RESTRICTED = "access_restricted"
     RATE_LIMITED = "rate_limited"
     NO_CONTENT = "no_content"
     NETWORK = "network"
@@ -25,6 +26,8 @@ def classify_exception(exc: Exception) -> ClassifiedError:
     lowered = message.lower()
     if "安全验证" in message or "captcha" in lowered or "滑块" in message:
         return ClassifiedError(CrawlFailureType.CAPTCHA_REQUIRED, message, _extract_debug_path(message))
+    if ("ip" in lowered and "风险" in message) or "网络环境" in message:
+        return ClassifiedError(CrawlFailureType.ACCESS_RESTRICTED, message, _extract_debug_path(message))
     if "登录" in message or "login" in lowered or "auth" in lowered:
         return ClassifiedError(CrawlFailureType.AUTH_REQUIRED, message, _extract_debug_path(message))
     if "429" in lowered or "rate" in lowered or "限频" in message:

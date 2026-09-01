@@ -18,6 +18,7 @@ export type Note = {
   id: number;
   platform_note_id: string;
   note_type: string;
+  completeness: 'card' | 'partial' | 'complete' | string;
   title: string;
   content: string;
   author_id: string | null;
@@ -49,7 +50,7 @@ export type NoteStats = {
   total_sources: number;
 };
 
-export type SourceType = 'keyword' | 'profile' | 'note';
+export type SourceType = 'explore' | 'keyword' | 'profile' | 'note';
 
 export type Source = {
   id: number;
@@ -82,6 +83,7 @@ export type CrawlJobItem = {
 export type CrawlJob = {
   id: number;
   status: string;
+  crawl_mode: CrawlMode;
   max_notes_per_source: number;
   total_sources: number;
   completed_sources: number;
@@ -96,6 +98,8 @@ export type CrawlJob = {
   updated_at: string;
   items: CrawlJobItem[];
 };
+
+export type CrawlMode = 'auto' | 'public' | 'authenticated';
 
 export type CrawlerSession = {
   id: number;

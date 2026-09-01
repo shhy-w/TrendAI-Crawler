@@ -16,7 +16,7 @@ router = APIRouter(prefix="/crawl-jobs", tags=["crawl-jobs"])
 @router.post("", response_model=CrawlJobRead, status_code=201)
 def create_job(payload: CrawlJobCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> CrawlJob:
     try:
-        job = create_crawl_job(db, payload.source_ids, payload.max_notes_per_source)
+        job = create_crawl_job(db, payload.source_ids, payload.max_notes_per_source, payload.crawl_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     background_tasks.add_task(run_crawl_job, job.id)

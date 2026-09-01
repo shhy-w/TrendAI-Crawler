@@ -11,6 +11,7 @@ def _note(title: str, media_url: str) -> CrawledNote:
     return CrawledNote(
         platform_note_id="note-1",
         note_type="normal",
+        completeness="complete",
         title=title,
         content="正文",
         note_url="https://www.xiaohongshu.com/explore/note-1",
@@ -29,9 +30,10 @@ def test_create_crawl_job_builds_source_items(db_session) -> None:
     db_session.add(source)
     db_session.commit()
 
-    job = create_crawl_job(db_session, [source.id], 10)
+    job = create_crawl_job(db_session, [source.id], 10, "public")
 
     assert job.status == "pending"
+    assert job.crawl_mode == "public"
     assert job.total_sources == 1
     assert job.items[0].source_name == "AI 工具"
 
@@ -48,6 +50,7 @@ def test_upsert_notes_updates_content_and_tracks_multiple_sources(db_session) ->
     note = db_session.scalar(select(Note))
     assert note is not None
     assert note.title == "新标题"
+    assert note.completeness == "complete"
     assert note.media_items[0].media_url == "https://img.example/2.jpg"
     assert db_session.query(NoteSource).count() == 2
     assert len(note.metric_snapshots) == 2
