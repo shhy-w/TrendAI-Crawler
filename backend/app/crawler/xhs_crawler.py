@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
 
+import httpx
 from playwright.async_api import BrowserContext, Error as PlaywrightError, Page, Response, async_playwright
 
 from app.core.config import settings
+from app.crawler.html_extractor import extract_notes_from_html
 from app.crawler.parser import extract_notes_from_payload, parse_compact_count, parse_note_id
 from app.crawler.types import CrawledMedia, CrawledNote
 from app.models.crawl_job import CrawlMode
@@ -66,6 +68,27 @@ class XHSCrawler:
                 ) from auth_error
 
     async def _crawl_public(self, source_type: str, target: str, limit: int) -> list[CrawledNote]:
+        page_url = self._source_url(source_type, target)
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=settings.crawler_navigation_timeout_ms / 1000,
+            headers={
+                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "accept-language": "zh-CN,zh;q=0.9",
+                "user-agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+                ),
+            },
+        ) as client:
+            response = await client.get(page_url)
+            response.raise_for_status()
+            if "/website-login/error" in str(response.url) or "IP存在风险" in response.text:
+                raise XHSAccessRestrictedError("小红书限制了当前 IP 或网络环境，请更换可靠网络后重试。")
+            notes = extract_notes_from_html(response.text)
+            if notes:
+                return notes[:limit]
+
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=settings.crawler_headless)
             context = await browser.new_context(

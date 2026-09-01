@@ -8,6 +8,7 @@ __pycache__/
 htmlcov/
 
 **/.playwright-profile/
+backend/.xhs-profile/
 backend/.crawler-debug/
 backend/alembic/versions/*.pyc
 
