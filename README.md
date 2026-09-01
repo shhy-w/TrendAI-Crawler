@@ -1,12 +1,14 @@
-# TrendAI Crawler
+# RedScope
 
-本项目是一个本地 MVP：使用 Playwright 采集 X 上的 AI、vibe coding、agent 等热门内容，FastAPI 提供接口，MySQL 存储数据，React 前端用于查看文章和媒体外链。采集器默认只跑公开通道且 headless 运行，不会弹登录窗口；需要时可手动启用登录态 fallback。
+RedScope 是一个本地运行的小红书内容研究工具。它使用 Playwright 复用用户主动登录的小红书网页会话，按关键词、博主主页或单篇笔记链接采集公开笔记；FastAPI 提供接口，MySQL 存储笔记、媒体、信源、任务和互动指标快照，React 前端用于检索与管理。
 
-## 目录
+## 主要能力
 
-- `backend/`：FastAPI、SQLAlchemy、Alembic、Playwright 爬虫。
-- `frontend/`：Vite + React + TypeScript 前端。
-- `docker-compose.yml`：本地 MySQL。
+- 笔记库：按标题、正文、作者、信源和内容类型筛选，支持互动量、发布时间和采集时间排序。
+- 信源管理：支持关键词、博主主页、单篇笔记链接三种入口。
+- 采集任务：按信源独立记录进度、发现数、写入数与失败原因。
+- 登录会话：从页面打开本地浏览器完成扫码登录，并在线验证会话状态。
+- 趋势基础：每次更新笔记时保存点赞、收藏、评论和分享指标快照。
 
 ## 本地启动
 
@@ -22,7 +24,7 @@ cp .env.example .env
 docker compose up -d mysql
 ```
 
-3. 启动后端：
+3. 安装并启动后端：
 
 ```bash
 cd backend
@@ -34,17 +36,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-4. 可选：登录 X：
-
-```bash
-cd backend
-source .venv/bin/activate
-python scripts/open_x_login.py
-```
-
-脚本会打开持久化浏览器窗口。手动登录 X 后关闭窗口，后续采集会复用 `CRAWLER_PROFILE_DIR` 中的登录态。默认配置 `CRAWLER_CHANNEL=public` 且 `CRAWLER_HEADLESS=true`，不会打开登录窗口；如果你确实要公开失败后 fallback 到登录态，设置 `CRAWLER_CHANNEL=dual` 和 `CRAWLER_FALLBACK_TO_AUTH=true`。
-
-5. 启动前端：
+4. 安装并启动前端：
 
 ```bash
 cd frontend
@@ -52,36 +44,34 @@ npm install
 npm run dev
 ```
 
-默认访问 `http://localhost:5173`。
-
-## 采集说明
-
-第一版只支持手动触发。前端会调用 `POST /api/crawl-jobs`，后端创建任务并异步执行采集。媒体不下载，只保存图片、视频缩略图等外链。
-
-公开通道会按顺序尝试：
-
-1. X 前端内部接口：获取 guest token，动态发现 `SearchTimeline` GraphQL queryId，解析 JSON 响应。
-2. Playwright 页面兜底：监听 X 页面网络 JSON 响应，同时保留 DOM 解析。
-3. 失败诊断：保存 HTML、截图和元信息到 `CRAWLER_DEBUG_DIR`。
-
-X 页面结构、公开访问策略和风控会变化。如果任务失败，请先查看 `crawl_jobs.error_message` 或后端日志。若错误是 `guest token 获取失败：HTTP 401`，说明当前网络/IP 下 X 已拒绝匿名 guest token；要达到商业工具稳定性，需要继续引入代理池、账号池或第三方数据源。
-
-## X Relay
-
-如果本机直连 X 不稳定，可以在能稳定访问 X 的服务器上部署 `backend/scripts/x_relay.py`。本地后端通过 `X_RELAY_URL` 调用 relay，relay 再走服务器本机的 `X_RELAY_UPSTREAM_PROXY` 访问 X。脚本默认只允许转发到 `x.com`、`twitter.com`、`api.twitter.com` 和 `abs.twimg.com`，并建议配置 `X_RELAY_TOKEN`，不要暴露成开放代理。
-
-服务器示例：
+访问 `http://localhost:5173`。首次使用先进入“登录会话”，点击“打开登录窗口”，使用小红书 App 扫码登录并关闭浏览器窗口，然后点击“验证当前会话”。也可以从命令行登录：
 
 ```bash
-cd /opt/x-relay
-export X_RELAY_TOKEN=your-relay-token
-export X_RELAY_UPSTREAM_PROXY=http://127.0.0.1:7890
-python3 -m uvicorn x_relay:app --host 0.0.0.0 --port 8787
+cd backend
+source .venv/bin/activate
+python scripts/open_xhs_login.py
 ```
 
-本地 `.env` 示例：
+## 从旧版本升级
+
+`202611010005_xiaohongshu_rebuild` 会删除原 X 平台的帖子、token、queryId、代理和任务数据，并创建小红书数据结构。执行迁移前，如需保留旧数据，请先自行备份数据库。
 
 ```bash
-X_RELAY_URL=http://your-server-ip:8787
-X_RELAY_TOKEN=your-relay-token
+cd backend
+source .venv/bin/activate
+alembic upgrade head
 ```
+
+## 采集策略
+
+采集器不会直接调用未公开的签名接口，而是在正常浏览器会话中监听页面已经产生的 JSON 响应，并以可见 DOM 作为降级路径。任务默认串行执行，出现登录失效、安全验证、限频或页面结构变化时会停止对应信源并保存失败信息；空内容或安全验证会把 HTML、截图和元信息写入 `CRAWLER_DEBUG_DIR`。
+
+小红书网页结构和访问策略可能变化。该项目适合作为低频、内部内容研究工具，不应绕过验证码、访问控制或平台限制，也不适合作为承诺稳定 SLA 的公共数据服务。仅采集账号有权正常浏览的公开内容，并遵守适用的平台条款、版权和个人信息保护要求。
+
+## 项目结构
+
+- `backend/app/crawler/`：小红书页面采集与结构化解析。
+- `backend/app/models/`：笔记、媒体、信源、任务、会话和指标模型。
+- `backend/app/api/`：笔记、信源、任务和会话接口。
+- `frontend/src/`：React 内容研究工作台。
+- `docker-compose.yml`：本地 MySQL。

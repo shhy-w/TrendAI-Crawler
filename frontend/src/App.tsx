@@ -1,199 +1,155 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
-import { addProxy, checkProxies, createJob, listJobs, listPosts, listProxies } from './lib/api';
-import type { CrawlJob, Post, PostFilters, ProxyItem } from './types/api';
-import { CrawlPanel } from './components/CrawlPanel';
-import { Filters } from './components/Filters';
-import { PostDetail } from './components/PostDetail';
-import { PostList } from './components/PostList';
-import { ProxyPanel } from './components/ProxyPanel';
+import { Activity, AlertCircle, Bell, Library, LogIn, Plus, Rss, X } from 'lucide-react';
+import {
+  createJob,
+  createSource,
+  deleteSource,
+  getNoteStats,
+  getSession,
+  listJobs,
+  listNotes,
+  listSources,
+  openLogin,
+  updateSource,
+  verifySession,
+} from './lib/api';
+import type { CrawlerSession, CrawlJob, Note, NoteFilters, NoteStats, Source, SourceType } from './types/api';
+import { JobsPage } from './components/JobsPage';
+import { NewJobDialog } from './components/NewJobDialog';
+import { NoteDetail } from './components/NoteDetail';
+import { NotesPage } from './components/NotesPage';
+import { SessionPage } from './components/SessionPage';
+import { SourcesPage } from './components/SourcesPage';
+import { statusLabel } from './lib/format';
 import './styles/app.css';
 
-const initialFilters: PostFilters = {
-  page: 1,
-  page_size: 20,
-  sort: 'hot',
-};
+type Page = 'library' | 'jobs' | 'sources' | 'session';
+
+const initialFilters: NoteFilters = { page: 1, page_size: 18, sort: 'engagement' };
+const emptyStats: NoteStats = { total_notes: 0, added_last_24h: 0, active_sources: 0, total_sources: 0 };
 
 export default function App() {
-  const [filters, setFilters] = useState<PostFilters>(initialFilters);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState<Page>('library');
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [stats, setStats] = useState<NoteStats>(emptyStats);
+  const [sources, setSources] = useState<Source[]>([]);
   const [jobs, setJobs] = useState<CrawlJob[]>([]);
-  const [proxies, setProxies] = useState<ProxyItem[]>([]);
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [keywords, setKeywords] = useState('AI, vibe coding, agent');
-  const [maxPosts, setMaxPosts] = useState(20);
-  const [proxyName, setProxyName] = useState('');
-  const [proxyUrl, setProxyUrl] = useState('');
-  const [loadingPosts, setLoadingPosts] = useState(false);
-  const [creatingJob, setCreatingJob] = useState(false);
-  const [proxyLoading, setProxyLoading] = useState(false);
+  const [session, setSession] = useState<CrawlerSession | null>(null);
+  const [filters, setFilters] = useState<NoteFilters>(initialFilters);
+  const [noteTotal, setNoteTotal] = useState(0);
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [noteView, setNoteView] = useState<'grid' | 'list'>('grid');
+  const [showJobDialog, setShowJobDialog] = useState(false);
+  const [loadingNotes, setLoadingNotes] = useState(true);
+  const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasRunningJob = useMemo(() => jobs.some((job) => job.status === 'pending' || job.status === 'running'), [jobs]);
+  const hasRunningJob = useMemo(() => jobs.some((job) => ['pending', 'running'].includes(job.status)), [jobs]);
+  const sessionBusy = session?.status === 'login_running' || session?.status === 'verifying';
 
-  async function refreshPosts(nextFilters = filters) {
-    setLoadingPosts(true);
-    setError(null);
+  async function refreshNotes(nextFilters = filters) {
+    setLoadingNotes(true);
     try {
-      const response = await listPosts(nextFilters);
-      setPosts(response.items);
-      setTotal(response.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载内容失败');
-    } finally {
-      setLoadingPosts(false);
-    }
+      const result = await listNotes(nextFilters);
+      setNotes(result.items); setNoteTotal(result.total);
+    } catch (err) { reportError(err); }
+    finally { setLoadingNotes(false); }
   }
 
-  async function refreshJobs() {
-    try {
-      setJobs(await listJobs());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载任务失败');
-    }
+  async function refreshOverview() {
+    const results = await Promise.allSettled([getNoteStats(), listSources(), listJobs(), getSession()]);
+    if (results[0].status === 'fulfilled') setStats(results[0].value);
+    if (results[1].status === 'fulfilled') setSources(results[1].value);
+    if (results[2].status === 'fulfilled') setJobs(results[2].value);
+    if (results[3].status === 'fulfilled') setSession(results[3].value);
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') reportError(failed.reason);
   }
 
-  async function refreshProxies() {
-    try {
-      setProxies(await listProxies());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载代理失败');
-    }
-  }
-
-  async function handleCreateJob() {
-    const parsedKeywords = keywords
-      .split(',')
-      .map((keyword) => keyword.trim())
-      .filter(Boolean);
-    if (parsedKeywords.length === 0) {
-      setError('至少需要一个关键词');
-      return;
-    }
-    setCreatingJob(true);
-    setError(null);
-    try {
-      await createJob(parsedKeywords, maxPosts);
-      await refreshJobs();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建采集任务失败');
-    } finally {
-      setCreatingJob(false);
-    }
-  }
-
-  async function handleAddProxy() {
-    if (!proxyName.trim() || !proxyUrl.trim()) {
-      setError('代理名称和 URL 都必填');
-      return;
-    }
-    setProxyLoading(true);
-    setError(null);
-    try {
-      await addProxy(proxyName.trim(), proxyUrl.trim());
-      setProxyName('');
-      setProxyUrl('');
-      await refreshProxies();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '添加代理失败');
-    } finally {
-      setProxyLoading(false);
-    }
-  }
-
-  async function handleCheckProxies() {
-    setProxyLoading(true);
-    setError(null);
-    try {
-      const results = await checkProxies();
-      const failed = results.filter((result) => !result.guest_token_ok);
-      if (failed.length > 0) {
-        setError(`代理检查完成，${failed.length} 个代理不可用`);
-      }
-      await refreshProxies();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '检查代理失败');
-    } finally {
-      setProxyLoading(false);
-    }
-  }
-
-  function handleFiltersChange(nextFilters: PostFilters) {
-    setFilters(nextFilters);
-    void refreshPosts(nextFilters);
-  }
-
+  useEffect(() => { void refreshOverview(); }, []);
   useEffect(() => {
-    void refreshPosts();
-    void refreshJobs();
-    void refreshProxies();
-  }, []);
-
+    const timer = window.setTimeout(() => void refreshNotes(filters), 220);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
   useEffect(() => {
-    if (!hasRunningJob) return;
-    const timer = window.setInterval(() => {
-      void refreshJobs();
-      void refreshPosts();
-    }, 4000);
+    if (!hasRunningJob && !sessionBusy) return;
+    const timer = window.setInterval(() => void refreshOverview(), 3500);
     return () => window.clearInterval(timer);
-  }, [hasRunningJob, filters]);
+  }, [hasRunningJob, sessionBusy]);
+
+  function reportError(value: unknown) { setError(value instanceof Error ? value.message : '操作失败，请稍后重试。'); }
+
+  async function handleCreateSource(name: string, type: SourceType, target: string) {
+    setWorking(true); setError(null);
+    try { await createSource(name.trim(), type, target.trim()); setSources(await listSources()); setStats(await getNoteStats()); }
+    catch (err) { reportError(err); throw err; }
+    finally { setWorking(false); }
+  }
+
+  async function handleToggleSource(source: Source) {
+    try { await updateSource(source.id, !source.enabled); setSources(await listSources()); setStats(await getNoteStats()); }
+    catch (err) { reportError(err); }
+  }
+
+  async function handleDeleteSource(source: Source) {
+    if (!window.confirm(`确定删除信源“${source.name}”吗？已采集的笔记会保留。`)) return;
+    try { await deleteSource(source.id); setSources(await listSources()); setStats(await getNoteStats()); }
+    catch (err) { reportError(err); }
+  }
+
+  async function handleCreateJob(sourceIds: number[], maxNotes: number) {
+    setWorking(true); setError(null);
+    try { await createJob(sourceIds, maxNotes); setJobs(await listJobs()); setShowJobDialog(false); setPage('jobs'); }
+    catch (err) { reportError(err); }
+    finally { setWorking(false); }
+  }
+
+  async function handleVerifySession() {
+    setWorking(true); setError(null);
+    try { setSession(await verifySession()); }
+    catch (err) { reportError(err); }
+    finally { setWorking(false); }
+  }
+
+  async function handleOpenLogin() {
+    setWorking(true); setError(null);
+    try { setSession(await openLogin()); }
+    catch (err) { reportError(err); }
+    finally { setWorking(false); }
+  }
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
       <header className="topbar">
-        <div>
-          <h1>TrendAI Crawler</h1>
-          <p>X 热门 AI 内容采集与查看</p>
+        <div className="brand"><span className="brand-mark">R</span><div><strong>RedScope</strong><small>小红书内容研究台</small></div></div>
+        <div className="top-actions">
+          <button className={`session-health status-${session?.status ?? 'unknown'}`} onClick={() => setPage('session')}><span />{session ? (statusLabel[session.status] ?? session.status) : '检查会话'}</button>
+          <button className="icon-button" title="任务通知" aria-label="任务通知" onClick={() => setPage('jobs')}><Bell size={18} /></button>
+          <button className="primary-button" onClick={() => setShowJobDialog(true)}><Plus size={17} />新建采集</button>
         </div>
       </header>
-
-      {error ? (
-        <div className="error-banner">
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      ) : null}
-
+      {error ? <div className="error-banner" role="alert"><AlertCircle size={18} /><span>{error}</span><button aria-label="关闭错误提示" title="关闭" onClick={() => setError(null)}><X size={17} /></button></div> : null}
       <div className="workspace">
-        <aside className="sidebar">
-          <CrawlPanel
-            keywords={keywords}
-            maxPosts={maxPosts}
-            jobs={jobs}
-            loading={creatingJob}
-            onKeywordsChange={setKeywords}
-            onMaxPostsChange={setMaxPosts}
-            onCreateJob={handleCreateJob}
-            onRefreshJobs={refreshJobs}
-          />
-          <ProxyPanel
-            proxies={proxies}
-            proxyName={proxyName}
-            proxyUrl={proxyUrl}
-            loading={proxyLoading}
-            onProxyNameChange={setProxyName}
-            onProxyUrlChange={setProxyUrl}
-            onAddProxy={handleAddProxy}
-            onRefresh={refreshProxies}
-            onCheck={handleCheckProxies}
-          />
-        </aside>
-        <section className="content">
-          <Filters filters={filters} onChange={handleFiltersChange} />
-          <PostList
-            posts={posts}
-            loading={loadingPosts}
-            total={total}
-            page={filters.page}
-            pageSize={filters.page_size}
-            onPageChange={(page) => handleFiltersChange({ ...filters, page })}
-            onSelectPost={setSelectedPost}
-          />
-        </section>
+        <nav className="sidebar" aria-label="主导航">
+          <NavButton active={page === 'library'} icon={<Library size={18} />} label="笔记库" onClick={() => setPage('library')} />
+          <NavButton active={page === 'jobs'} icon={<Activity size={18} />} label="采集任务" onClick={() => setPage('jobs')} />
+          <NavButton active={page === 'sources'} icon={<Rss size={18} />} label="信源管理" onClick={() => setPage('sources')} />
+          <span className="nav-section-label">运维</span>
+          <NavButton active={page === 'session'} icon={<LogIn size={18} />} label="登录会话" onClick={() => setPage('session')} />
+        </nav>
+        <main className="main-content">
+          {page === 'library' ? <NotesPage notes={notes} stats={stats} sources={sources} total={noteTotal} loading={loadingNotes} filters={filters} view={noteView} onFiltersChange={setFilters} onViewChange={setNoteView} onSelect={setSelectedNote} /> : null}
+          {page === 'jobs' ? <JobsPage jobs={jobs} loading={working} onRefresh={() => void refreshOverview()} /> : null}
+          {page === 'sources' ? <SourcesPage sources={sources} onCreate={handleCreateSource} onToggle={handleToggleSource} onDelete={handleDeleteSource} /> : null}
+          {page === 'session' ? <SessionPage session={session} loading={working} onVerify={handleVerifySession} onLogin={handleOpenLogin} /> : null}
+        </main>
       </div>
-      <PostDetail post={selectedPost} onClose={() => setSelectedPost(null)} />
-    </main>
+      <NoteDetail note={selectedNote} sources={sources} onClose={() => setSelectedNote(null)} />
+      <NewJobDialog open={showJobDialog} sources={sources} loading={working} onClose={() => setShowJobDialog(false)} onCreate={handleCreateJob} onGoSources={() => { setShowJobDialog(false); setPage('sources'); }} />
+    </div>
   );
+}
+
+function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+  return <button className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={onClick}>{icon}<span>{label}</span></button>;
 }

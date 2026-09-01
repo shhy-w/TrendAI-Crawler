@@ -8,35 +8,84 @@ export type MediaItem = {
   sort_order: number;
 };
 
-export type Post = {
-  id: number;
-  x_post_id: string;
-  keyword: string;
-  text: string;
-  author_name: string | null;
-  author_handle: string | null;
-  published_at: string | null;
-  post_url: string;
-  reply_count: number;
-  repost_count: number;
-  like_count: number;
-  view_count: number;
-  crawled_at: string;
-  media_items: MediaItem[];
+export type NoteSourceLink = {
+  source_id: number;
+  discovered_at: string;
+  last_seen_at: string;
 };
 
-export type PostListResponse = {
-  items: Post[];
+export type Note = {
+  id: number;
+  platform_note_id: string;
+  note_type: string;
+  title: string;
+  content: string;
+  author_id: string | null;
+  author_name: string | null;
+  author_avatar: string | null;
+  published_at: string | null;
+  ip_location: string | null;
+  note_url: string;
+  like_count: number;
+  collect_count: number;
+  comment_count: number;
+  share_count: number;
+  crawled_at: string;
+  media_items: MediaItem[];
+  source_links: NoteSourceLink[];
+};
+
+export type NoteListResponse = {
+  items: Note[];
   total: number;
   page: number;
   page_size: number;
 };
 
+export type NoteStats = {
+  total_notes: number;
+  added_last_24h: number;
+  active_sources: number;
+  total_sources: number;
+};
+
+export type SourceType = 'keyword' | 'profile' | 'note';
+
+export type Source = {
+  id: number;
+  name: string;
+  source_type: SourceType;
+  target: string;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_result_count: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CrawlJobItem = {
+  id: number;
+  source_id: number | null;
+  source_name: string;
+  source_type: string;
+  target: string;
+  status: string;
+  discovered_count: number;
+  saved_count: number;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
 export type CrawlJob = {
   id: number;
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | string;
-  keywords: string[];
-  max_posts_per_keyword: number;
+  status: string;
+  max_notes_per_source: number;
+  total_sources: number;
+  completed_sources: number;
+  discovered_count: number;
   started_at: string | null;
   finished_at: string | null;
   success_count: number;
@@ -45,34 +94,26 @@ export type CrawlJob = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  items: CrawlJobItem[];
 };
 
-export type ProxyItem = {
+export type CrawlerSession = {
   id: number;
   name: string;
-  proxy_url: string;
   status: string;
-  failure_count: number;
-  success_count: number;
+  last_verified_at: string | null;
   last_error: string | null;
-  last_checked_at: string | null;
-  cooldown_until: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type ProxyCheckResult = {
-  proxy_id: number;
-  status: string;
-  message: string;
-  guest_token_ok: boolean;
-};
-
-export type PostFilters = {
+export type NoteFilters = {
   page: number;
   page_size: number;
-  keyword?: string;
+  query?: string;
   author?: string;
+  source_id?: number;
+  note_type?: string;
   has_media?: boolean;
-  sort: 'hot' | 'published_at' | 'crawled_at';
+  sort: 'engagement' | 'published_at' | 'crawled_at';
 };

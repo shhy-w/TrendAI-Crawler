@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
-from app.models import crawl_job, media, post  # noqa: F401
+from app import models  # noqa: F401
 
 
 @pytest.fixture()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -15,16 +16,20 @@ class CrawledMedia:
 
 
 @dataclass
-class CrawledPost:
-    x_post_id: str
-    keyword: str
-    text: str
+class CrawledNote:
+    platform_note_id: str
+    note_type: str
+    title: str
+    content: str
+    note_url: str
+    author_id: str | None
     author_name: str | None
-    author_handle: str | None
+    author_avatar: str | None
     published_at: datetime | None
-    post_url: str
-    reply_count: int = 0
-    repost_count: int = 0
+    ip_location: str | None = None
     like_count: int = 0
-    view_count: int = 0
+    collect_count: int = 0
+    comment_count: int = 0
+    share_count: int = 0
     media_items: list[CrawledMedia] = field(default_factory=list)
+    raw_data: dict[str, Any] | None = None

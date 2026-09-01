@@ -7,25 +7,46 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.crawler.errors import CrawlFailureType, classify_exception
-from app.crawler.x_crawler import XCrawler
+from app.crawler.types import CrawledNote
+from app.crawler.xhs_crawler import XHSCrawler
 from app.db.session import SessionLocal
-from app.models.crawl_failure import CrawlFailure
 from app.models.crawl_job import CrawlJob, CrawlJobStatus
+from app.models.crawl_job_item import CrawlJobItem
+from app.models.crawler_session import CrawlerSessionStatus
 from app.models.media import Media
-from app.models.post import Post
-from app.crawler.types import CrawledPost
-from app.services.cache_service import get_cached_posts, set_cached_posts
-from app.services.proxy_service import choose_proxy, mark_proxy_failure, mark_proxy_success
+from app.models.note import Note
+from app.models.note_metric_snapshot import NoteMetricSnapshot
+from app.models.note_source import NoteSource
+from app.models.source import Source
+from app.services.cache_service import get_cached_notes, set_cached_notes
+from app.services.session_service import get_or_create_session
 
 
-def create_crawl_job(db: Session, keywords: list[str], max_posts_per_keyword: int) -> CrawlJob:
-    normalized_keywords = sorted({keyword.strip() for keyword in keywords if keyword.strip()})
+def create_crawl_job(db: Session, source_ids: list[int], max_notes_per_source: int) -> CrawlJob:
+    normalized_ids = list(dict.fromkeys(source_ids))
+    sources = list(db.scalars(select(Source).where(Source.id.in_(normalized_ids), Source.enabled.is_(True))))
+    source_by_id = {source.id: source for source in sources}
+    ordered_sources = [source_by_id[source_id] for source_id in normalized_ids if source_id in source_by_id]
+    if not ordered_sources:
+        raise ValueError("至少选择一个已启用的信源。")
     job = CrawlJob(
         status=CrawlJobStatus.PENDING.value,
-        keywords=normalized_keywords,
-        max_posts_per_keyword=max_posts_per_keyword,
+        max_notes_per_source=max_notes_per_source,
+        total_sources=len(ordered_sources),
+        completed_sources=0,
+        discovered_count=0,
         success_count=0,
     )
+    for source in ordered_sources:
+        job.items.append(
+            CrawlJobItem(
+                source_id=source.id,
+                source_name=source.name,
+                source_type=source.source_type,
+                target=source.target,
+                status=CrawlJobStatus.PENDING.value,
+            )
+        )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -39,7 +60,7 @@ def run_crawl_job(job_id: int) -> None:
 async def _run_crawl_job(job_id: int) -> None:
     db = SessionLocal()
     try:
-        job = db.get(CrawlJob, job_id)
+        job = db.get(CrawlJob, job_id, options=[selectinload(CrawlJob.items)])
         if not job:
             return
         job.status = CrawlJobStatus.RUNNING.value
@@ -48,90 +69,119 @@ async def _run_crawl_job(job_id: int) -> None:
         job.debug_path = None
         job.error_message = None
         db.commit()
+        crawler = XHSCrawler()
+        failed_items = 0
+        first_failure_type: str | None = None
+        for item in job.items:
+            item.status = CrawlJobStatus.RUNNING.value
+            item.started_at = datetime.now(timezone.utc)
+            db.commit()
+            source = db.get(Source, item.source_id) if item.source_id else None
+            try:
+                notes = get_cached_notes(db, item.source_type, item.target, job.max_notes_per_source)
+                if notes is None:
+                    notes = await crawler.crawl_source(item.source_type, item.target, job.max_notes_per_source)
+                    set_cached_notes(db, item.source_type, item.target, job.max_notes_per_source, notes)
+                item.discovered_count = len(notes)
+                item.saved_count = upsert_notes(db, notes, source)
+                item.status = CrawlJobStatus.SUCCEEDED.value
+                if source:
+                    source.last_run_at = datetime.now(timezone.utc)
+                    source.last_success_at = source.last_run_at
+                    source.last_result_count = len(notes)
+                    source.last_error = None
+            except Exception as exc:
+                db.rollback()
+                item = db.get(CrawlJobItem, item.id)
+                source = db.get(Source, item.source_id) if item and item.source_id else None
+                classified = classify_exception(exc)
+                failed_items += 1
+                first_failure_type = first_failure_type or classified.failure_type
+                if item:
+                    item.status = CrawlJobStatus.FAILED.value
+                    item.error_message = classified.message[:1024]
+                if source:
+                    source.last_run_at = datetime.now(timezone.utc)
+                    source.last_error = classified.message[:1024]
+                if classified.failure_type == CrawlFailureType.AUTH_REQUIRED:
+                    session = get_or_create_session(db)
+                    session.status = CrawlerSessionStatus.AUTH_REQUIRED
+                    session.last_error = classified.message[:1024]
+            finally:
+                item = db.get(CrawlJobItem, item.id)
+                if item:
+                    item.finished_at = datetime.now(timezone.utc)
+                job = db.get(CrawlJob, job_id)
+                if job:
+                    job.completed_sources += 1
+                    job.discovered_count += item.discovered_count if item else 0
+                    job.success_count += item.saved_count if item else 0
+                db.commit()
 
-        proxy = choose_proxy(db)
-        crawler = XCrawler(proxy_url=proxy.proxy_url if proxy else None, db=db, proxy_id=proxy.id if proxy else None)
-        total_saved = 0
-        for keyword in job.keywords:
-            crawled_posts = get_cached_posts(db, keyword, job.max_posts_per_keyword)
-            if crawled_posts is None:
-                crawled_posts = await crawler.crawl_keyword(keyword, job.max_posts_per_keyword)
-                set_cached_posts(db, keyword, job.max_posts_per_keyword, crawled_posts)
-            total_saved += upsert_posts(db, crawled_posts)
-        mark_proxy_success(db, proxy)
-
-        job.status = CrawlJobStatus.SUCCEEDED.value
-        job.success_count = total_saved
+        job = db.get(CrawlJob, job_id)
+        if not job:
+            return
+        if failed_items == job.total_sources:
+            job.status = CrawlJobStatus.FAILED.value
+            job.error_message = "所有信源采集失败，请查看任务明细。"
+        elif failed_items:
+            job.status = CrawlJobStatus.PARTIAL.value
+            job.error_message = f"{failed_items} 个信源采集失败。"
+        else:
+            job.status = CrawlJobStatus.SUCCEEDED.value
+        job.failure_type = first_failure_type
         job.finished_at = datetime.now(timezone.utc)
         db.commit()
-    except Exception as exc:
-        db.rollback()
-        job = db.get(CrawlJob, job_id)
-        if job:
-            classified = classify_exception(exc)
-            job.status = CrawlJobStatus.FAILED.value
-            job.failure_type = classified.failure_type
-            job.debug_path = classified.debug_path
-            job.error_message = classified.message
-            job.finished_at = datetime.now(timezone.utc)
-            db.add(
-                CrawlFailure(
-                    job_id=job.id,
-                    keyword=",".join(job.keywords),
-                    failure_type=classified.failure_type,
-                    message=classified.message,
-                    debug_path=classified.debug_path,
-                    proxy_id=proxy.id if "proxy" in locals() and proxy else None,
-                )
-            )
-            db.commit()
-            if classified.failure_type in {
-                CrawlFailureType.NETWORK,
-                CrawlFailureType.RATE_LIMITED,
-                CrawlFailureType.GUEST_TOKEN_DENIED,
-            }:
-                mark_proxy_failure(db, proxy if "proxy" in locals() else None, classified.message)
     finally:
         db.close()
 
 
-def upsert_posts(db: Session, crawled_posts: list[CrawledPost]) -> int:
+def upsert_notes(db: Session, crawled_notes: list[CrawledNote], source: Source | None) -> int:
     saved = 0
-    for crawled in crawled_posts:
-        post = db.scalar(
-            select(Post)
-            .where(Post.x_post_id == crawled.x_post_id)
-            .options(selectinload(Post.media_items))
+    now = datetime.now(timezone.utc)
+    for crawled in crawled_notes:
+        note = db.scalar(
+            select(Note).where(Note.platform_note_id == crawled.platform_note_id).options(selectinload(Note.media_items))
         )
-        if post is None:
-            post = Post(x_post_id=crawled.x_post_id)
-            db.add(post)
-        post.keyword = crawled.keyword
-        post.text = crawled.text
-        post.author_name = crawled.author_name
-        post.author_handle = crawled.author_handle
-        post.published_at = crawled.published_at
-        post.post_url = crawled.post_url
-        post.reply_count = crawled.reply_count
-        post.repost_count = crawled.repost_count
-        post.like_count = crawled.like_count
-        post.view_count = crawled.view_count
-        post.crawled_at = datetime.now(timezone.utc)
+        if note is None:
+            note = Note(platform_note_id=crawled.platform_note_id, title="", content="", note_url=crawled.note_url)
+            db.add(note)
+        note.note_type = crawled.note_type
+        note.title = crawled.title or note.title
+        note.content = crawled.content or note.content
+        note.author_id = crawled.author_id or note.author_id
+        note.author_name = crawled.author_name or note.author_name
+        note.author_avatar = crawled.author_avatar or note.author_avatar
+        note.published_at = crawled.published_at or note.published_at
+        note.ip_location = crawled.ip_location or note.ip_location
+        note.note_url = crawled.note_url or note.note_url
+        note.like_count = crawled.like_count
+        note.collect_count = crawled.collect_count
+        note.comment_count = crawled.comment_count
+        note.share_count = crawled.share_count
+        note.crawled_at = now
+        note.raw_data = crawled.raw_data or note.raw_data
         db.flush()
-
-        db.execute(delete(Media).where(Media.post_id == post.id))
-        for media in crawled.media_items:
-            db.add(
-                Media(
-                    post_id=post.id,
-                    media_type=media.media_type,
-                    media_url=media.media_url,
-                    thumbnail_url=media.thumbnail_url,
-                    width=media.width,
-                    height=media.height,
-                    sort_order=media.sort_order,
-                )
+        if crawled.media_items:
+            db.execute(delete(Media).where(Media.note_id == note.id))
+            for media in crawled.media_items:
+                db.add(Media(note_id=note.id, **media.__dict__))
+        if source:
+            link = db.scalar(select(NoteSource).where(NoteSource.note_id == note.id, NoteSource.source_id == source.id))
+            if link is None:
+                db.add(NoteSource(note_id=note.id, source_id=source.id, discovered_at=now, last_seen_at=now))
+            else:
+                link.last_seen_at = now
+        db.add(
+            NoteMetricSnapshot(
+                note_id=note.id,
+                like_count=note.like_count,
+                collect_count=note.collect_count,
+                comment_count=note.comment_count,
+                share_count=note.share_count,
+                captured_at=now,
             )
+        )
         saved += 1
     db.commit()
     return saved
