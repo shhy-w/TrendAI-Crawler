@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.crawler.errors import CrawlFailureType, classify_exception
-from app.crawler.types import CrawledNote
+from app.crawler.types import CrawledMedia, CrawledNote
 from app.crawler.xhs_crawler import XHSCrawler
 from app.db.session import SessionLocal
 from app.models.crawl_job import CrawlJob, CrawlJobStatus, CrawlMode
@@ -25,6 +25,7 @@ from app.services.account_protection_service import (
     reserve_authenticated_access,
 )
 from app.services.cache_service import get_cached_notes, set_cached_notes
+from app.services.media_archive_service import archive_note_media
 from app.services.session_service import get_or_create_session
 
 
@@ -134,6 +135,7 @@ async def _run_crawl_job(job_id: int) -> None:
                     )
                 item.discovered_count = len(notes)
                 item.saved_count = upsert_notes(db, notes, source)
+                await archive_crawled_notes(db, notes)
                 item.status = CrawlJobStatus.SUCCEEDED.value
                 if source:
                     source.last_run_at = datetime.now(timezone.utc)
@@ -222,9 +224,7 @@ def upsert_notes(db: Session, crawled_notes: list[CrawledNote], source: Source |
         note.raw_data = crawled.raw_data or note.raw_data
         db.flush()
         if crawled.media_items:
-            db.execute(delete(Media).where(Media.note_id == note.id))
-            for media in crawled.media_items:
-                db.add(Media(note_id=note.id, **media.__dict__))
+            _merge_media_items(note, crawled.media_items)
         if source:
             link = db.scalar(select(NoteSource).where(NoteSource.note_id == note.id, NoteSource.source_id == source.id))
             if link is None:
@@ -244,3 +244,87 @@ def upsert_notes(db: Session, crawled_notes: list[CrawledNote], source: Source |
         saved += 1
     db.commit()
     return saved
+
+
+MEDIA_QUALITY_RANK = {
+    "preview": 0,
+    "detail": 1,
+    "original": 2,
+    "playback": 2,
+}
+
+
+def _merge_media_items(note: Note, incoming_items: list[CrawledMedia]) -> None:
+    existing_by_slot = {
+        (media.media_type, media.sort_order): media
+        for media in note.media_items
+    }
+    for incoming in incoming_items:
+        existing = existing_by_slot.get((incoming.media_type, incoming.sort_order))
+        if existing is None:
+            added = Media(**incoming.__dict__)
+            note.media_items.append(added)
+            existing_by_slot[(incoming.media_type, incoming.sort_order)] = added
+            continue
+        if incoming.media_url == existing.media_url:
+            existing.thumbnail_url = incoming.thumbnail_url or existing.thumbnail_url
+            if not (existing.archive_status == "archived" and existing.local_path):
+                if _pixel_area(incoming.width, incoming.height) > _pixel_area(existing.width, existing.height):
+                    existing.width = incoming.width
+                    existing.height = incoming.height
+            if _quality_rank(incoming.quality) > _quality_rank(existing.quality):
+                existing.quality = incoming.quality
+            continue
+        if not _incoming_media_is_better(existing, incoming):
+            continue
+        existing.media_url = incoming.media_url
+        existing.thumbnail_url = incoming.thumbnail_url
+        existing.width = incoming.width
+        existing.height = incoming.height
+        existing.quality = incoming.quality
+        _clear_archive_metadata(existing)
+
+
+def _incoming_media_is_better(existing: Media, incoming: CrawledMedia) -> bool:
+    existing_quality = _quality_rank(existing.quality)
+    incoming_quality = _quality_rank(incoming.quality)
+    if incoming_quality != existing_quality:
+        return incoming_quality > existing_quality
+
+    existing_area = _pixel_area(existing.width, existing.height)
+    incoming_area = _pixel_area(incoming.width, incoming.height)
+    if existing_area and incoming_area and incoming_area != existing_area:
+        return incoming_area > existing_area
+
+    # A completed archive is preferable when the new candidate has no measurable advantage.
+    return not (existing.archive_status == "archived" and existing.local_path)
+
+
+def _quality_rank(quality: str) -> int:
+    return MEDIA_QUALITY_RANK.get(quality, 0)
+
+
+def _pixel_area(width: int | None, height: int | None) -> int:
+    return (width or 0) * (height or 0)
+
+
+def _clear_archive_metadata(media: Media) -> None:
+    media.archive_status = "remote"
+    media.local_path = None
+    media.mime_type = None
+    media.file_size = None
+    media.checksum_sha256 = None
+    media.duration_seconds = None
+    media.archive_error = None
+    media.archived_at = None
+
+
+async def archive_crawled_notes(db: Session, crawled_notes: list[CrawledNote]) -> None:
+    for crawled in crawled_notes:
+        note = db.scalar(
+            select(Note)
+            .where(Note.platform_note_id == crawled.platform_note_id)
+            .options(selectinload(Note.media_items))
+        )
+        if note:
+            await archive_note_media(db, note)

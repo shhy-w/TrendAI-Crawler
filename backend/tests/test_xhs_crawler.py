@@ -1,7 +1,8 @@
 import pytest
 
 from app.crawler.errors import CrawlFailureType, classify_exception
-from app.crawler.types import CrawledNote
+from app.crawler.parser import note_fidelity_score
+from app.crawler.types import CrawledMedia, CrawledNote
 from app.crawler.xhs_crawler import XHSAuthRequiredError, XHSCrawler, XHSNoContentError
 
 
@@ -81,6 +82,28 @@ async def test_public_mode_never_uses_authenticated_channel(monkeypatch: pytest.
 def test_access_restriction_is_classified_separately() -> None:
     classified = classify_exception(RuntimeError("小红书限制了当前 IP 或网络环境"))
     assert classified.failure_type == CrawlFailureType.ACCESS_RESTRICTED
+
+
+def test_note_fidelity_prefers_original_media_over_longer_preview_content() -> None:
+    preview = _note()
+    preview.completeness = "complete"
+    preview.content = "较长的预览正文" * 20
+    preview.media_items = [CrawledMedia("image", "https://img.example/preview.jpg", quality="preview")]
+
+    original = _note()
+    original.completeness = "complete"
+    original.content = "正文"
+    original.media_items = [
+        CrawledMedia(
+            "image",
+            "https://img.example/original.jpg",
+            width=2160,
+            height=2880,
+            quality="original",
+        )
+    ]
+
+    assert note_fidelity_score(original) > note_fidelity_score(preview)
 
 
 @pytest.mark.asyncio

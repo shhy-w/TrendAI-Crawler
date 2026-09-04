@@ -13,6 +13,7 @@ class CrawledMedia:
     width: int | None = None
     height: int | None = None
     sort_order: int = 0
+    quality: str = "preview"
 
 
 @dataclass

@@ -13,6 +13,10 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+export function resolveApiUrl(url: string): string {
+  return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -48,6 +52,8 @@ export function listNotes(filters: NoteFilters): Promise<NoteListResponse> {
 }
 
 export const getNote = (id: number) => request<Note>(`/api/notes/${id}`);
+export const archiveNoteMedia = (id: number) => request<Note>(`/api/notes/${id}/archive-media`, { method: 'POST' });
+export const enrichNote = (id: number) => request<Note>(`/api/notes/${id}/enrich`, { method: 'POST' });
 export const getNoteStats = () => request<NoteStats>('/api/notes/stats');
 export const listSources = () => request<Source[]>('/api/sources');
 export const listJobs = () => request<CrawlJob[]>('/api/crawl-jobs');

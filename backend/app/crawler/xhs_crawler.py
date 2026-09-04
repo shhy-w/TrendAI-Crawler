@@ -13,7 +13,7 @@ from playwright.async_api import BrowserContext, Error as PlaywrightError, Page,
 
 from app.core.config import settings
 from app.crawler.html_extractor import extract_notes_from_html
-from app.crawler.parser import extract_notes_from_payload, parse_compact_count, parse_note_id
+from app.crawler.parser import extract_notes_from_payload, note_fidelity_score, parse_compact_count, parse_note_id
 from app.crawler.types import CrawledMedia, CrawledNote
 from app.models.crawl_job import CrawlMode
 from app.models.source import SourceType
@@ -226,7 +226,7 @@ class XHSCrawler:
             return
         for note in extract_notes_from_payload(payload):
             existing = notes.get(note.platform_note_id)
-            if existing is None or len(note.content) > len(existing.content):
+            if existing is None or note_fidelity_score(note) > note_fidelity_score(existing):
                 notes[note.platform_note_id] = note
 
     async def _parse_visible_notes(self, page: Page) -> list[CrawledNote]:

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     crawler_debug_dir: str = "backend/.crawler-debug"
     crawler_cache_ttl_seconds: int = 900
     default_keywords: str = "AI工具,效率工具,职场效率"
+    media_archive_enabled: bool = True
+    media_archive_dir: str = "backend/.media-archive"
+    media_archive_image_max_bytes: int = 25 * 1024 * 1024
+    media_archive_video_max_bytes: int = 250 * 1024 * 1024
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])
 
@@ -41,6 +45,13 @@ class Settings(BaseSettings):
     @property
     def debug_path(self) -> Path:
         path = Path(self.crawler_debug_dir).expanduser()
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        return path.resolve()
+
+    @property
+    def media_archive_path(self) -> Path:
+        path = Path(self.media_archive_dir).expanduser()
         if not path.is_absolute():
             path = ROOT_DIR / path
         return path.resolve()

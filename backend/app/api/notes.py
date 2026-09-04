@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -8,11 +9,21 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_db
+from app.core.config import settings
+from app.crawler.errors import CrawlFailureType, classify_exception
+from app.crawler.xhs_crawler import XHSCrawler
 from app.models.media import Media
 from app.models.note import Note
 from app.models.note_source import NoteSource
 from app.models.source import Source
 from app.schemas.note import NoteListResponse, NoteRead, NoteStatsRead
+from app.services.account_protection_service import (
+    record_authenticated_failure,
+    record_authenticated_success,
+    reserve_authenticated_access,
+)
+from app.services.crawl_service import upsert_notes
+from app.services.media_archive_service import archive_note_media
 
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -61,6 +72,47 @@ def get_note(note_id: int, db: Session = Depends(get_db)) -> Note:
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     return note
+
+
+@router.post("/{note_id}/archive-media", response_model=NoteRead)
+async def archive_media(note_id: int, db: Session = Depends(get_db)) -> Note:
+    note = db.get(Note, note_id, options=[selectinload(Note.media_items), selectinload(Note.source_links)])
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    await archive_note_media(db, note)
+    return db.get(Note, note_id, options=[selectinload(Note.media_items), selectinload(Note.source_links)])
+
+
+@router.post("/{note_id}/enrich", response_model=NoteRead)
+async def enrich_note(note_id: int, db: Session = Depends(get_db)) -> Note:
+    note = db.get(Note, note_id, options=[selectinload(Note.media_items), selectinload(Note.source_links)])
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    try:
+        wait_seconds = reserve_authenticated_access(db, cost=1 + settings.crawler_scroll_rounds)
+        if wait_seconds:
+            await asyncio.sleep(wait_seconds)
+        crawled_notes = await XHSCrawler().crawl_source("note", note.note_url, 1, "authenticated")
+        matching = next((item for item in crawled_notes if item.platform_note_id == note.platform_note_id), None)
+        if not matching:
+            raise RuntimeError("详情响应中未找到目标笔记。")
+        upsert_notes(db, [matching], source=None)
+        record_authenticated_success(db)
+        enriched = db.scalar(
+            select(Note)
+            .where(Note.id == note_id)
+            .options(selectinload(Note.media_items), selectinload(Note.source_links))
+        )
+        await archive_note_media(db, enriched)
+        return enriched
+    except Exception as exc:
+        classified = classify_exception(exc)
+        record_authenticated_failure(db, classified.failure_type, classified.message)
+        status_code = 409 if classified.failure_type in {
+            CrawlFailureType.AUTH_REQUIRED,
+            CrawlFailureType.PROTECTION_BLOCKED,
+        } else 502
+        raise HTTPException(status_code=status_code, detail=classified.message) from exc
 
 
 def _apply_filters(

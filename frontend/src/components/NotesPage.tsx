@@ -1,6 +1,7 @@
 import { Bookmark, Grid2X2, Heart, Image as ImageIcon, List, MessageCircle, Search, Share2 } from 'lucide-react';
 import type { Note, NoteFilters, NoteStats, Source } from '../types/api';
 import { compactNumber, completenessLabel } from '../lib/format';
+import { resolveApiUrl } from '../lib/api';
 
 type Props = {
   notes: Note[];
@@ -74,7 +75,7 @@ export function NotesPage({ notes, stats, sources, total, loading, filters, view
       <div className={`note-collection ${view}`}>
         {notes.map((note) => {
           const media = note.media_items[0];
-          const imageUrl = media?.thumbnail_url ?? media?.media_url;
+          const imageUrl = media ? resolveApiUrl(media.media_type === 'image' ? media.content_url : (media.thumbnail_url ?? media.media_url)) : undefined;
           return (
             <article className="note-card" key={note.id}>
               <button className="note-card-action" type="button" onClick={() => onSelect(note)}>

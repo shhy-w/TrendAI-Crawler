@@ -6,6 +6,15 @@ export type MediaItem = {
   width: number | null;
   height: number | null;
   sort_order: number;
+  quality: 'preview' | 'original' | string;
+  archive_status: 'remote' | 'archiving' | 'archived' | 'failed' | string;
+  content_url: string;
+  mime_type: string | null;
+  file_size: number | null;
+  checksum_sha256: string | null;
+  duration_seconds: number | null;
+  archive_error: string | null;
+  archived_at: string | null;
 };
 
 export type NoteSourceLink = {

@@ -9,6 +9,8 @@ from app.crawler.types import CrawledMedia, CrawledNote
 
 NOTE_ID_RE = re.compile(r"/(?:explore|discovery/item)/([A-Za-z0-9]+)")
 COUNT_RE = re.compile(r"([\d,.]+)\s*([KMB万亿]?)", re.IGNORECASE)
+NOTE_COMPLETENESS_RANK = {"card": 0, "partial": 1, "complete": 2}
+MEDIA_QUALITY_RANK = {"preview": 0, "detail": 1, "original": 2, "playback": 2}
 
 
 def parse_note_id(url: str) -> str | None:
@@ -45,16 +47,45 @@ def parse_datetime(value: str | int | float | None) -> datetime | None:
         return None
 
 
-def normalize_media(urls: list[tuple[str, str | None, int | None, int | None]]) -> list[CrawledMedia]:
+def normalize_media(urls: list[tuple[str, str | None, int | None, int | None, str]]) -> list[CrawledMedia]:
     media_items: list[CrawledMedia] = []
     seen: set[str] = set()
-    for url, thumbnail_url, width, height in urls:
+    for url, thumbnail_url, width, height, quality in urls:
         if not url or url in seen:
             continue
         seen.add(url)
         media_type = "video" if "video" in url or ".mp4" in url else "image"
-        media_items.append(CrawledMedia(media_type, url, thumbnail_url or (url if media_type == "image" else None), width, height, len(media_items)))
+        media_items.append(
+            CrawledMedia(
+                media_type,
+                url,
+                thumbnail_url or (url if media_type == "image" else None),
+                width,
+                height,
+                len(media_items),
+                quality,
+            )
+        )
     return media_items
+
+
+def note_fidelity_score(note: CrawledNote) -> tuple[int, int, int, int, int]:
+    media_quality = max(
+        (MEDIA_QUALITY_RANK.get(media.quality, 0) for media in note.media_items),
+        default=0,
+    )
+    pixel_total = sum(
+        (media.width or 0) * (media.height or 0)
+        for media in note.media_items
+        if media.media_type == "image"
+    )
+    return (
+        media_quality,
+        NOTE_COMPLETENESS_RANK.get(note.completeness, 0),
+        len(note.media_items),
+        pixel_total,
+        len(note.content),
+    )
 
 
 def extract_notes_from_payload(payload: object) -> list[CrawledNote]:
@@ -66,11 +97,11 @@ def extract_notes_from_payload(payload: object) -> list[CrawledNote]:
             if isinstance(note_card, dict):
                 note = build_crawled_note(note_card, value)
                 if note:
-                    notes[note.platform_note_id] = note
+                    _keep_best_note(notes, note)
             elif _looks_like_note(value):
                 note = build_crawled_note(value, value)
                 if note:
-                    notes[note.platform_note_id] = note
+                    _keep_best_note(notes, note)
             for nested in value.values():
                 walk(nested)
         elif isinstance(value, list):
@@ -79,6 +110,12 @@ def extract_notes_from_payload(payload: object) -> list[CrawledNote]:
 
     walk(payload)
     return list(notes.values())
+
+
+def _keep_best_note(notes: dict[str, CrawledNote], candidate: CrawledNote) -> None:
+    existing = notes.get(candidate.platform_note_id)
+    if existing is None or note_fidelity_score(candidate) > note_fidelity_score(existing):
+        notes[candidate.platform_note_id] = candidate
 
 
 def build_crawled_note(card: dict, envelope: dict | None = None) -> CrawledNote | None:
@@ -93,21 +130,22 @@ def build_crawled_note(card: dict, envelope: dict | None = None) -> CrawledNote 
     if token:
         note_url = f"{note_url}?{urlencode({'xsec_token': str(token), 'xsec_source': 'pc_search'})}"
 
-    media_values: list[tuple[str, str | None, int | None, int | None]] = []
+    media_values: list[tuple[str, str | None, int | None, int | None, str]] = []
     for image in card.get("image_list") or card.get("imageList") or []:
         if not isinstance(image, dict):
             continue
         url = _image_url(image)
         if url:
-            media_values.append((url, url, _safe_int(image.get("width")) or None, _safe_int(image.get("height")) or None))
+            quality = "original" if url == image.get("url_default") else "detail"
+            media_values.append((url, url, _safe_int(image.get("width")) or None, _safe_int(image.get("height")) or None, quality))
     video_url, video_cover = _video_urls(card.get("video"))
     if video_url:
-        media_values.append((video_url, video_cover, None, None))
+        media_values.append((video_url, video_cover, None, None, "playback"))
     if not media_values:
         cover = card.get("cover") if isinstance(card.get("cover"), dict) else {}
         cover_url = _image_url(cover)
         if cover_url:
-            media_values.append((cover_url, cover_url, _safe_int(cover.get("width")) or None, _safe_int(cover.get("height")) or None))
+            media_values.append((cover_url, cover_url, _safe_int(cover.get("width")) or None, _safe_int(cover.get("height")) or None, "preview"))
 
     return CrawledNote(
         platform_note_id=note_id,
@@ -145,14 +183,20 @@ def _completeness(card: dict) -> str:
 
 
 def _image_url(image: dict) -> str | None:
-    for key in ("url_default", "url_pre", "url"):
+    candidates: list[tuple[int, str]] = []
+    for priority, key in ((100, "url_default"), (80, "url"), (20, "url_pre")):
         value = image.get(key)
         if isinstance(value, str) and value.startswith("http"):
-            return value
+            candidates.append((priority, value))
     for info in image.get("info_list") or []:
-        if isinstance(info, dict) and isinstance(info.get("url"), str) and info["url"].startswith("http"):
-            return info["url"]
-    return None
+        if not isinstance(info, dict):
+            continue
+        value = info.get("url")
+        if isinstance(value, str) and value.startswith("http"):
+            scene = str(info.get("image_scene") or info.get("imageScene") or "").upper()
+            priority = 90 if "DFT" in scene else 30 if "PRV" in scene else 60
+            candidates.append((priority, value))
+    return max(candidates, default=(0, None), key=lambda item: item[0])[1]
 
 
 def _video_urls(video: object) -> tuple[str | None, str | None]:
@@ -160,17 +204,26 @@ def _video_urls(video: object) -> tuple[str | None, str | None]:
         return None, None
     image = video.get("image")
     cover = _image_url(image) if isinstance(image, dict) else None
-    stack: list[object] = [video]
+    candidates: list[tuple[int, str]] = []
+    stack: list[tuple[object, str]] = [(video, "video")]
     while stack:
-        value = stack.pop()
+        value, path = stack.pop()
         if isinstance(value, dict):
             for key, nested in value.items():
-                if key in {"master_url", "backup_url", "url"} and isinstance(nested, str) and nested.startswith("http"):
-                    return nested, cover
-                stack.append(nested)
+                next_path = f"{path}.{key}".lower()
+                if key in {"master_url", "backup_url"} and isinstance(nested, str) and nested.startswith("http"):
+                    codec_score = 1_000_000 if "h264" in next_path or "avc" in next_path else 0
+                    container_score = 100_000 if ".mp4" in nested.lower() else 0
+                    bitrate = _safe_int(value.get("video_bitrate") or value.get("avg_bitrate") or value.get("bitrate"))
+                    candidates.append((codec_score + container_score + bitrate, nested))
+                elif key == "url" and isinstance(nested, str) and nested.startswith("http") and "stream" in next_path:
+                    candidates.append((1, nested))
+                if key not in {"image", "cover", "thumbnail"}:
+                    stack.append((nested, next_path))
         elif isinstance(value, list):
-            stack.extend(value)
-    return None, cover
+            stack.extend((nested, path) for nested in value)
+    best_url = max(candidates, default=(0, None), key=lambda item: item[0])[1]
+    return best_url, cover
 
 
 def _safe_int(value: object) -> int:

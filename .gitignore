@@ -10,6 +10,7 @@ htmlcov/
 **/.playwright-profile/
 backend/.xhs-profile/
 backend/.crawler-debug/
+backend/.media-archive/
 backend/alembic/versions/*.pyc
 
 frontend/node_modules/

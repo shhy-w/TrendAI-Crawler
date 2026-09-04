@@ -14,6 +14,15 @@ class MediaRead(BaseModel):
     width: Optional[int]
     height: Optional[int]
     sort_order: int
+    quality: str
+    archive_status: str
+    content_url: str
+    mime_type: Optional[str]
+    file_size: Optional[int]
+    checksum_sha256: Optional[str]
+    duration_seconds: Optional[float]
+    archive_error: Optional[str]
+    archived_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
 

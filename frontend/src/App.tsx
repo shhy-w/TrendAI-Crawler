@@ -4,6 +4,8 @@ import {
   createJob,
   createSource,
   deleteSource,
+  archiveNoteMedia,
+  enrichNote,
   getNoteStats,
   getSession,
   listJobs,
@@ -43,6 +45,7 @@ export default function App() {
   const [showJobDialog, setShowJobDialog] = useState(false);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [working, setWorking] = useState(false);
+  const [mediaWorking, setMediaWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasRunningJob = useMemo(() => jobs.some((job) => ['pending', 'running'].includes(job.status)), [jobs]);
@@ -128,6 +131,26 @@ export default function App() {
     finally { setWorking(false); }
   }
 
+  async function handleArchiveMedia(note: Note) {
+    setMediaWorking(true); setError(null);
+    try {
+      const updated = await archiveNoteMedia(note.id);
+      setSelectedNote(updated);
+      await refreshNotes(filters, true);
+    } catch (err) { reportError(err); }
+    finally { setMediaWorking(false); }
+  }
+
+  async function handleEnrichNote(note: Note) {
+    setMediaWorking(true); setError(null);
+    try {
+      const updated = await enrichNote(note.id);
+      setSelectedNote(updated);
+      await Promise.all([refreshNotes(filters, true), refreshOverview()]);
+    } catch (err) { reportError(err); }
+    finally { setMediaWorking(false); }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -154,7 +177,7 @@ export default function App() {
           {page === 'session' ? <SessionPage session={session} loading={working} onVerify={handleVerifySession} onLogin={handleOpenLogin} onUpdateProtection={handleUpdateProtection} /> : null}
         </main>
       </div>
-      <NoteDetail note={selectedNote} sources={sources} onClose={() => setSelectedNote(null)} />
+      <NoteDetail note={selectedNote} sources={sources} sessionActive={session?.status === 'active'} working={mediaWorking} onClose={() => setSelectedNote(null)} onArchive={handleArchiveMedia} onEnrich={handleEnrichNote} />
       <NewJobDialog open={showJobDialog} sources={sources} sessionActive={session?.status === 'active'} loading={working} onClose={() => setShowJobDialog(false)} onCreate={handleCreateJob} onGoSources={() => { setShowJobDialog(false); setPage('sources'); }} />
     </div>
   );
